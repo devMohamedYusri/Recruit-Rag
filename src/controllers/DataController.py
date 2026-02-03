@@ -1,6 +1,9 @@
+import os
 import uuid
 from .BaseController import BaseController
 from fastapi import UploadFile
+from .ProjectController import ProjectController
+project_controller=ProjectController()
 class DataController(BaseController):
     def __init__(self):
         super().__init__()
@@ -28,5 +31,8 @@ class DataController(BaseController):
     def generate_unique_file_name(self, original_file_name: str, project_id: str) -> str:
         extension = original_file_name.split(".")[-1]
         unique_id = str(uuid.uuid4())
+        new_file_name = f"{project_id}_{unique_id}.{extension}"
 
-        return f"{project_id}_{unique_id}.{extension}"
+        project_path=project_controller.get_project_asset_path(project_id)
+        file_path = os.path.join(project_path, new_file_name)
+        return file_path,new_file_name

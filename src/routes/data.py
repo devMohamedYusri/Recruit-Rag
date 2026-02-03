@@ -30,9 +30,7 @@ async def upload_data(project_id:str,file:UploadFile,
         })
     
     
-    project_path=project_controller.get_project_asset_path(project_id)
-    file_name=data_controller.generate_unique_file_name(file.filename,project_id)
-    file_path=os.path.join(project_path,file_name)
+    file_path,file_name=data_controller.generate_unique_file_name(file.filename,project_id)
     try:
          async with aiofiles.open(file_path,'wb') as out_file:
             while chunk:=await file.read(app_settings.FILE_DEFAULT_CHUNK_SIZE):
