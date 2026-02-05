@@ -19,6 +19,9 @@ class settings(BaseSettings):
     MONGO_DB:str=Field(default="mongodb://localhost:27017")
     DB_NAME:str=Field(default="recruit-rag")
 
+    PROJECTS_COLLECTION:str=Field(default="projects")
+    CHUNKS_COLLECTION:str=Field(default="chunks")
+
 @lru_cache()   
 def get_settings():
     return settings()
