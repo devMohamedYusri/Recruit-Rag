@@ -1,0 +1,18 @@
+from pydantic import BaseModel, BeforeValidator, Field, field_validator, ConfigDict
+from typing import Annotated, Optional
+
+PyObjectId = Annotated[str, BeforeValidator(str)]
+class Project(BaseModel):
+    id: Optional[PyObjectId] = Field(alias="_id", default=None)
+    project_id: Optional[str]=Field(...,min_length=1)
+    model_config: ConfigDict = ConfigDict(
+        arbitrary_types_allowed=True,
+        populate_by_name=True
+        )
+
+    @field_validator('project_id')    
+    @classmethod
+    def validate_project_id(cls, v):
+        if not v.isalnum():
+            raise ValueError("Project ID must be alphanumeric")
+        return v
