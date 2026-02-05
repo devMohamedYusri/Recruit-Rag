@@ -1,5 +1,12 @@
-# Recruit RAG
-this a minimal implementation for a rag system to fetch the cvs and answering questions about them and give the right answers based on the available cvs
+# RecruitRAG: AI-Powered Semantic Recruitment Tool
+RecruitRAG is an intelligent recruitment assistant built to streamline the hiring process. By leveraging Retrieval-Augmented Generation (RAG), it allows recruiters to perform deep semantic searches across candidate resumes, extracting the most relevant talent using natural language queries instead of simple keyword matching.
+
+## 🚀 Key Features
+
+- **Semantic Search**: Go beyond keywords to find candidates based on context and experience.
+- **Automated Summarization**: Quickly understand a candidate's profile with AI-generated summaries.
+- **Intelligent Ranking**: Rank resumes based on job description relevance using vector embeddings.
+- **WhatsApp Integration**: Potential for AI sales agents to interact with candidates or clients directly via WhatsApp.
 
 ## requirements
 -python 3.11 or later

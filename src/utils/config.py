@@ -16,6 +16,9 @@ class settings(BaseSettings):
     FILE_DEFAULT_CHUNK_SIZE:int=Field(default=1048576)
     FILE_BYTES_TO_MB:int=Field(default=1024*1024)
 
+    MONGO_DB:str=Field(default="mongodb://localhost:27017")
+    DB_NAME:str=Field(default="recruit-rag")
+
 @lru_cache()   
 def get_settings():
     return settings()
