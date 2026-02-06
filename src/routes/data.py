@@ -3,10 +3,9 @@ from fastapi.responses import JSONResponse
 from utils import get_settings,settings
 from controllers import DataController,ProjectController,ProcessController
 from .schema import processRequest
-from models import ProjectModel
+from models import ProjectModel,Chunk,ChunkModel,AssetModel,Asset
 import aiofiles
-from models import Chunk
-from models import ChunkModel
+import os
 
 data_controller=DataController()
 project_controller=ProjectController()
@@ -20,7 +19,7 @@ data_router=APIRouter(
 async def upload_data(request:Request,project_id:str,file:UploadFile,
                 app_settings:settings=Depends(get_settings)):
     
-    project_model=ProjectModel(
+    project_model=await ProjectModel.create_instance(
         db_client=request.app.db_client
     )
 
@@ -51,10 +50,22 @@ async def upload_data(request:Request,project_id:str,file:UploadFile,
             "error":str(e),
             "status":"error"
         })
+    print(f"File saved at: {project_id}/{file_name}, full path: {file_path}, size: {os.path.getsize(file_path)} bytes, content type: {file.content_type}")
+    asset_model=await AssetModel.create_instance(db_client=request.app.db_client)
+    asset_record=Asset(
+        project_id=project_id,
+        name=file_name,
+        type=file.content_type,
+        size_in_bytes=os.path.getsize(file_path),
+        url=file_path
+    )
+    created_asset=await asset_model.create_asset(asset_record)
+    
     return JSONResponse(
         content={
             "message":f"File uploaded successfully",
             "file_name":file_name,
+            "file_id":str(created_asset.id),
             "status":"success"
         }
     )
@@ -69,10 +80,10 @@ async def process_data(requests:Request,project_id:str,request:processRequest):
     chunk_overlap=request.chunk_overlap
     do_reset=request.do_reset
 
-    chunk_model=ChunkModel(
+    chunk_model=await ChunkModel.create_instance(
             db_client=requests.app.db_client
         )
-    project_model=ProjectModel(
+    project_model=await ProjectModel.create_instance(
         db_client=requests.app.db_client
     )
 

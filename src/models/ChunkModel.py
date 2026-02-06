@@ -1,13 +1,34 @@
 from .DB_schemas.chunk import Chunk
 from .BaseDataModel import BaseDataModel
 from bson import ObjectId
-from pymongo import InsertOne
+from pymongo import IndexModel, InsertOne
 
 
 class ChunkModel(BaseDataModel):
     collection_setting_key:str="CHUNKS_COLLECTION"
     def __init__(self,db_client:object):
         super().__init__(db_client=db_client)
+        self.collection = self.db_client[self.collection_setting_key]
+
+    @classmethod
+    async def create_instance(cls,db_client:object):
+        instance=cls(db_client=db_client)
+        await instance.init_collection()
+        return instance
+
+
+    async def init_collection(self):
+        indexes = Chunk.get_indexes()
+        models=[
+            IndexModel(
+                index['fields'],
+                name=index['name'],
+                unique=index.get('unique', False)
+            )for index in indexes
+        ]
+
+        if models:
+            await self.collection.create_indexes(models)
 
     async def create_chunk(self,chunk_data:Chunk):
         data=chunk_data.model_dump(by_alias=True,exclude_none=True)
