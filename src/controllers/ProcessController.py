@@ -1,4 +1,8 @@
 import os
+
+from fastapi import Request, requests
+
+from models import Chunk,ChunkModel
 from .BaseController import BaseController
 from .ProjectController import ProjectController
 from langchain_pymupdf4llm import PyMuPDF4LLMLoader 
@@ -49,3 +53,24 @@ class ProcessController(BaseController):
             file_meta_data.append(meta)
 
         return chunks , file_content_texts, file_meta_data
+    
+    async def process_one_file(self,chunk_model:ChunkModel,file_id:str,chunk_size:int=1000,chunk_overlap:int=200):
+        file_content = self.load_document(file_id=file_id)
+        chunks, _, _ = self.process_document(
+            file_content=file_content,
+            file_id=file_id,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+        
+        if chunks is None:
+            return None
+
+        chunks_records = [Chunk(
+            content=chunk.page_content,
+            metadata=chunk.metadata,
+            chunk_order=i + 1,
+            project_id=self.project_id
+        ) for i, chunk in enumerate(chunks)]
+        
+        return await chunk_model.create_chunks_bulk(chunks=chunks_records)
