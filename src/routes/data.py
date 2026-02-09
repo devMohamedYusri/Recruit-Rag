@@ -46,51 +46,60 @@ async def upload_data(request:Request,project_id:str,files: list[UploadFile],
 
 
 @data_router.post("/process/{project_id}",status_code=status.HTTP_200_OK)
-async def process_data(requests:Request,project_id:str,request:processRequest):
-    file_id=request.file_id
+async def process_data(requests: Request, project_id: str, request: processRequest):
+    db = requests.app.db_client
+    chunk_model = await ChunkModel.create_instance(db_client=db)
+    project_model = await ProjectModel.create_instance(db_client=db)
+    
+    project = await project_model.get_project_or_create_one(project_id=project_id)
 
-    chunk_model=await ChunkModel.create_instance(db_client=requests.app.db_client)
-    project_model=await ProjectModel.create_instance(db_client=requests.app.db_client)
-
-    project=await project_model.get_project_or_create_one(project_id=project_id)
-
-    project_files_ids=[]
-    if file_id is not None:
-        project_files_ids.append(file_id)
-    else:
-        asset_model=await AssetModel.create_instance(db_client=requests.app.db_client)
-        project_assets=await asset_model.get_assets_by_project_id(project_id=project.id)
-        project_files_ids=[str(asset.name) for asset in project_assets]
-
+    project_files_ids = []
+    
+    if request.file_ids:  
+        project_files_ids = request.file_ids
+    elif request.file_id:
+        project_files_ids = [request.file_id]
+    else:                
+        asset_model = await AssetModel.create_instance(db_client=db)
+        project_assets = await asset_model.get_assets_by_project_id(project_id=project_id)
+        project_files_ids = [str(asset.name) for asset in project_assets]
 
     if not project_files_ids:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail={
-            "message":"No files found for processing.",
-            "status":"error"
-        })
-    
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "No files found for processing.", "status": "error"}
+        )
     
     if request.do_reset:
-        await chunk_model.delete_chunks_by_project_id(project_id=project.id)
+        await chunk_model.delete_chunks_by_project_id(project_id=project_id)
     
-    process_controller=ProcessController(project_id=project.id)
-    results=[]
-    for file_id in project_files_ids:
-        count = await process_controller.process_one_file(
-            chunk_model=chunk_model,
-            file_id=file_id,
-            chunk_size=request.chunk_size,
-            chunk_overlap=request.chunk_overlap,
-        )
-        
-        if count is None:
-            raise HTTPException(status_code=500, detail="Processing failed for " + file_id)
-        
-        results.append({"file_id": file_id, "chunks_count": count})
+    process_controller = ProcessController(project_id=project_id)
+    results = []
+    errors = []
+
+    for f_id in project_files_ids:
+        try:
+            count = await process_controller.process_one_file(
+                chunk_model=chunk_model,
+                file_id=f_id,
+                chunk_size=request.chunk_size,
+                chunk_overlap=request.chunk_overlap,
+            )
+            
+            if count is None:
+                errors.append({"file_id": f_id, "error": "Processor returned None"})
+            else:
+                results.append({"file_id": f_id, "chunks_count": count})
+                
+        except Exception as e:
+            errors.append({"file_id": f_id, "error": str(e)})
+
     return JSONResponse(
         content={
-            "file_count":len(results),
-            "total_chunks_count":sum(r["chunks_count"] for r in results),
-            "status":"success"
+            "file_count": len(results),
+            "total_chunks_count": sum(r["chunks_count"] for r in results),
+            "errors_count": len(errors),
+            "errors": errors,
+            "status": "success" if not errors else "partial_success"
         }
     )
