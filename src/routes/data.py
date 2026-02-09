@@ -22,12 +22,10 @@ async def upload_data(request:Request,project_id:str,files: list[UploadFile],
     uploaded_assets = []
 
     for file in files:
-        # Validation
         valid_file = await data_controller.validate_file(file)
         if not valid_file.get("is_type_valid") or not valid_file.get("is_size_valid"):
             raise HTTPException(status_code=400, detail=f"Invalid file: {file.filename}")
 
-        # Use the controller to handle the "Work"
         try:
             created_asset = await data_controller.save_and_record_asset(
                 file, project_id, asset_model, app_settings

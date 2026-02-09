@@ -1,7 +1,4 @@
 import os
-
-from fastapi import Request, requests
-
 from models import Chunk,ChunkModel
 from .BaseController import BaseController
 from .ProjectController import ProjectController
