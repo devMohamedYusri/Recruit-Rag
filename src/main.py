@@ -14,13 +14,13 @@ async def lifespan(app:FastAPI):
     app.state.llm_provider_factory=LLMProviderFactory(settings)
     app.state.generation_client=app.state.llm_provider_factory.create(settings.GENERATION_BACKEND)
     app.state.embedding_client=app.state.llm_provider_factory.create(settings.EMBEDDING_BACKEND)
-
-    yield
-    
-    app.state.mongodb_conn.close()
-    app.state.llm_provider_factory=None
-    app.state.generation_client=None
-    app.state.embedding_client=None
+    try:
+        yield
+    finally:
+        app.state.mongodb_conn.close()
+        app.state.llm_provider_factory=None
+        app.state.generation_client=None
+        app.state.embedding_client=None
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(base_router)
