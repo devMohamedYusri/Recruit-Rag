@@ -8,6 +8,7 @@ class AssetModel(BaseDataModel):
     def __init__(self, db_client):
         super().__init__(db_client)
         self.collection = self.db_client[self.collection_setting_key]
+        
     @classmethod
     async def create_instance(cls,db_client:object):
         instance=cls(db_client=db_client)
@@ -25,7 +26,8 @@ class AssetModel(BaseDataModel):
         ]
 
         if models:
-            await self.collection.create_indexes(models)        
+            await self.collection.create_indexes(models)
+                
     async def create_asset(self,asset_data:Asset):
         data=asset_data.model_dump(by_alias=True,exclude_none=True)
         result = await self.collection.insert_one(data)
@@ -39,10 +41,12 @@ class AssetModel(BaseDataModel):
         if record:
             return Asset(**record)
         return None
+    
     async def get_all_project_asset(self,project_id:str):
         return await self.collection.find({
             "project_id":ObjectId(project_id) if ObjectId.is_valid(project_id) else project_id
         }).to_list(length=None)
+    
     async def delete_asset_by_id(self,asset_id:str):
         result=await self.collection.delete_one({
             "asset_id":asset_id
