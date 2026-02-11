@@ -9,11 +9,13 @@ class GeminiProvider(LLMInterface):
     def __init__(self,
         api_key: str, 
         model_id: str = "gemini-2.0-flash",
+        embedding_model_id: str = "gemini-embedding-001",
+        embedding_dimention: int = 768
      ):
         self.api_key = api_key
         self.model_id = model_id 
-        self.embedding_model_id=LLMConfig.embedding_model_id
-        self.embedding_dimention=LLMConfig.embedding_dimension
+        self.embedding_model_id=embedding_model_id
+        self.embedding_dimention=embedding_dimention
 
         if not self.api_key:
             raise ValueError("Google API key is required")
@@ -56,39 +58,54 @@ class GeminiProvider(LLMInterface):
             print(f"Gemini Error: {e}") 
             raise RuntimeError(f"Failed to generate content: {str(e)}")
         
-    async def embed_documents(self, texts, document_type):
+    async def embed_documents(self, texts):
         if not self.client:
-           self.logger.error("genai client was not set")
-           return None
+            self.logger.error("genai client was not set")
+            return None
         if not self.embedding_model_id:
-           self.logger.error("embedding model was not set")
-           return None
-        try:
-            response=await self.client.aio.models.embed_content(
-                model=self.embedding_model_id,
-                contents=texts,
-                config=types.EmbedContentConfig(
-                            task_type="RETRIEVAL_DOCUMENT", 
-                            title="Resume Snippet"
-                        )
-                
-            )
-            return [emb.values for emb in response.embeddings]
-        except Exception as e:
-                print(f"Embedding Doc Error: {e}")
-                return []
-       
-    
-    async def embed_query(self, text):
+            self.logger.error("embedding model was not set")
+            return None
         try:
             response = await self.client.aio.models.embed_content(
                 model=self.embedding_model_id,
-                contents=text,
+                contents=texts,
                 config=types.EmbedContentConfig(
-                    task_type="RETRIEVAL_QUERY"
+                    task_type="RETRIEVAL_DOCUMENT", 
+                    title="Resume Snippet",
+                    output_dimensionality=self.embedding_dimention
                 )
             )
-            return response.embeddings[0].values
+            
+            embeddings = []
+            for emb in response.embeddings:
+                v = np.array(emb.values)
+                norm = np.linalg.norm(v)
+                if norm > 0:
+                    v = v / norm
+                embeddings.append(v.tolist())
+                
+            return embeddings
         except Exception as e:
-            print(f"Embedding Query Error: {e}")
+            print(f"Embedding Doc Error: {e}")
             return []
+
+async def embed_query(self, text):
+    try:
+        response = await self.client.aio.models.embed_content(
+            model=self.embedding_model_id,
+            contents=text,
+            config=types.EmbedContentConfig(
+                task_type="RETRIEVAL_QUERY",
+                output_dimensionality=self.embedding_dimention
+            )
+        )
+        
+        v = np.array(response.embeddings[0].values)
+        norm = np.linalg.norm(v)
+        if norm > 0:
+            v = v / norm
+            
+        return v.tolist()
+    except Exception as e:
+        print(f"Embedding Query Error: {e}")
+        return []

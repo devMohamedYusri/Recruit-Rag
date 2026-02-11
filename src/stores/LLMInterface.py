@@ -11,7 +11,7 @@ class LLMInterface(ABC):
         pass
     
     @abstractmethod
-    def embed_documents(self,texts:list[str],document_type:str):
+    def embed_documents(self,texts:list[str]):
         """
         Embeds a list of texts for storage (Database).
         """

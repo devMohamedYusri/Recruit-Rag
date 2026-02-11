@@ -1,6 +1,6 @@
 from fastapi import APIRouter,Depends,UploadFile,HTTPException,status,Request
 from fastapi.responses import JSONResponse
-from utils import get_settings,settings
+from utils import get_settings,Settings
 from controllers import DataController,ProjectController,ProcessController
 from .schema import processRequest
 from models import ProjectModel,ChunkModel,AssetModel
@@ -14,7 +14,7 @@ data_router=APIRouter(
 
 @data_router.post("/upload/{project_id}",status_code=status.HTTP_201_CREATED)
 async def upload_data(request:Request,project_id:str,files: list[UploadFile],
-                app_settings:settings=Depends(get_settings)):
+                app_settings:Settings=Depends(get_settings)):
     
     project_model=await ProjectModel.create_instance(db_client=request.app.db_client)
     asset_model=await AssetModel.create_instance(db_client=request.app.db_client)

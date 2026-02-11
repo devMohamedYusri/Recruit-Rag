@@ -10,5 +10,9 @@ class LLMConfig:
         "gemini-1.5-pro":"gemini-1.5-pro",#more context
         "gemini-3-pro-preview":"Gemini-3-Pro-Preview"#reasoning and complex tasks
     }
-    embedding_model_id: str = "text-embedding-004",#gemini provider embedding
+    embedding_model_id: str = "gemini-embedding-001",#gemini provider embedding
     embedding_dimension: int = 768
+    GEMINI="gemini"
+    GROQ="groq"
+
+    
