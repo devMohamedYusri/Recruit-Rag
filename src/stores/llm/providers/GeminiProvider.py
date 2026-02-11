@@ -2,7 +2,6 @@ from typing import Optional, Dict, Any
 from google import genai
 from google.genai import types
 from ...LLMInterface import LLMInterface
-from ...LLMConfig import LLMConfig
 import logging
 
 class GeminiProvider(LLMInterface):

@@ -9,5 +9,14 @@ class BaseController:
         self.app_settings:Settings=get_settings()
         self.base_dir=os.path.dirname(os.path.dirname(__file__))
         self.assets_dir=os.path.join(self.base_dir,self.app_settings.UPLOAD_DIRECTORY)
+
+        self.db_directory=os.path.join(self.base_dir,self.app_settings.DB_DIRECTORY)
+
     def generate_random_id(self,length=12):
         return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+    def get_database_path(self,db_name:str):
+       database_path=os.path.join(self.db_directory,db_name)
+       if not os.path.exists(database_path):
+           os.makedirs(database_path)
+       return database_path
