@@ -10,9 +10,10 @@ class LLMConfig:
         "gemini-1.5-pro":"gemini-1.5-pro",#more context
         "gemini-3-pro-preview":"Gemini-3-Pro-Preview"#reasoning and complex tasks
     }
-    embedding_model_id: str = "gemini-embedding-001",#gemini provider embedding
-    embedding_dimension: int = 768
+    GEMINI_GENERATION_MODEL_ID: str = "gemini-2.0-flash",#gemini provider generation
+    EMBEDDING_MODEL_ID: str = "gemini-embedding-001",#gemini provider generation embedding
+    EMBEDDING_DIMENSION: int = 768
+    GROQ_GENERATION_MODEL_ID: str = "llama-3.1-8b-instant"
+
     GEMINI="gemini"
     GROQ="groq"
-
-    

@@ -16,8 +16,8 @@ data_router=APIRouter(
 async def upload_data(request:Request,project_id:str,files: list[UploadFile],
                 app_settings:Settings=Depends(get_settings)):
     
-    project_model=await ProjectModel.create_instance(db_client=request.app.db_client)
-    asset_model=await AssetModel.create_instance(db_client=request.app.db_client)
+    project_model=await ProjectModel.create_instance(db_client=request.app.state.db_client)
+    asset_model=await AssetModel.create_instance(db_client=request.app.state.db_client)
     await project_model.get_project_or_create_one(project_id=project_id)
     uploaded_assets = []
 
@@ -47,7 +47,7 @@ async def upload_data(request:Request,project_id:str,files: list[UploadFile],
 
 @data_router.post("/process/{project_id}",status_code=status.HTTP_200_OK)
 async def process_data(requests: Request, project_id: str, request: processRequest):
-    db = requests.app.db_client
+    db = requests.app.state.db_client
     chunk_model = await ChunkModel.create_instance(db_client=db)
     project_model = await ProjectModel.create_instance(db_client=db)
     
