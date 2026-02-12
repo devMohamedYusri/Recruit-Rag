@@ -77,20 +77,10 @@ class QdrantdbProvider(VectorDBInterface):
             wait=True
         )
 
-    async def search_by_text_filters(self, query_vector: List[float], k: int = 5, filters: Optional[Dict[str, Any]] = None) -> List[SearchResult]:
-        qdrant_filter = None
-        if filters:
-            must_conditions = []
-            for key, value in filters.items():
-                must_conditions.append(
-                    models.FieldCondition(key=key, match=models.MatchValue(value=value))
-                )
-            qdrant_filter = models.Filter(must=must_conditions)
-
+    async def search_vector_only(self, query_vector: List[float], k: int = 5) -> List[SearchResult]:
         hits = await self.client.search(
             collection_name=self.collection_name,
             query_vector=query_vector,
-            query_filter=qdrant_filter,
             limit=k,
             with_payload=True
         )
@@ -99,11 +89,11 @@ class QdrantdbProvider(VectorDBInterface):
             SearchResult(
                 id=str(hit.id),
                 score=hit.score,
-                content=hit.payload.get("text", ""), 
-                metadata={k: v for k, v in hit.payload.items() if k != "text"}
+                content=hit.payload.get("text", hit.payload.get("content", "")), 
+                metadata={k: v for k, v in hit.payload.items() if k not in ["text", "content"]}
             ) for hit in hits
         ]
-    
+
     async def delete(self, doc_id: str):
         await self.client.delete(
             collection_name=self.collection_name,

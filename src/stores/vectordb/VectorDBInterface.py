@@ -17,10 +17,9 @@ class VectorDBInterface(ABC):
         pass
     
     @abstractmethod
-    async def search_by_text_filters(self, query_vector: List[float], k: int = 5, filters: Optional[Dict[str, Any]] = None) -> List[SearchResult]:      
+    async def search_vector_only(self, query_vector: List[float], k: int = 5) -> List[SearchResult]:
         """
-        Input: Raw text query and optional filters.
-        Why: 'filters' is CRITICAL for RecruitRAG to filter by Location/Salary.
+        Performs a pure semantic vector search.
         """
         pass
     
