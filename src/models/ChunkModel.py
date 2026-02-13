@@ -52,9 +52,9 @@ class ChunkModel(BaseDataModel):
             Operations=[InsertOne(data) for data in data_batch]
             await self.collection.bulk_write(Operations)
         return len(chunks)
-    async def delete_chunks_by_project_id(self,project_id:ObjectId):
+    async def delete_chunks_by_project_id(self,project_id:str):
         result=await self.collection.delete_many({
-            "project_id":project_id
+            "project_id":ObjectId(project_id) if ObjectId.is_valid(project_id) else project_id
         })
         return result.deleted_count
         

@@ -1,1 +1,2 @@
-from .data import processRequest
+from .data import ProcessRequest
+from .vectors import UpsertVectorsRequest,SearchVectorsRequest
