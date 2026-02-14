@@ -1,7 +1,8 @@
 from pydantic import BaseModel
 from typing import Optional
-class processRequest(BaseModel):
-    file_id: str
-    chunk_size: Optional[int] = 100
-    chunk_overlap:Optional[int]=20
+class ProcessRequest(BaseModel):
+    file_ids: Optional[list[str]] = None
+    file_id: Optional[str] = None
+    chunk_size: Optional[int] = 600
+    chunk_overlap:Optional[int]=200
     do_reset:Optional[bool]=False

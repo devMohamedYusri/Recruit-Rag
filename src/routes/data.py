@@ -1,12 +1,10 @@
-import os
-from fastapi import APIRouter,Depends,UploadFile,HTTPException,status
+from fastapi import APIRouter,Depends,UploadFile,HTTPException,status,Request
 from fastapi.responses import JSONResponse
-from utils import get_settings,settings
-from controllers import DataController,ProjectController,ProcessController
-from .schema import processRequest
-import aiofiles
+from utils import get_settings,Settings
+from controllers import DataController,ProcessController
+from .schema import ProcessRequest
+from models import ProjectModel,ChunkModel,AssetModel
 data_controller=DataController()
-project_controller=ProjectController()
 
 data_router=APIRouter(
     prefix="/api/v1/data",
@@ -14,71 +12,101 @@ data_router=APIRouter(
 )
 
 @data_router.post("/upload/{project_id}",status_code=status.HTTP_201_CREATED)
-async def upload_data(project_id:str,file:UploadFile,
-                app_settings:settings=Depends(get_settings)):
-    valid_file= await data_controller.validate_file(file)
-
-    if not valid_file.get("is_type_valid",False):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail={
-            "message":"Invalid file type uploaded.",
-            "status":"error"
-        })
-    if not valid_file.get("is_size_valid",False):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail={
-            "message":"File size exceeds the maximum limit",
-            "status":"error"
-        })
+async def upload_data(
+    request:Request,
+    project_id:str,
+    files: list[UploadFile],
+    app_settings:Settings=Depends(get_settings)
+):
     
-    
-    file_path,file_name=data_controller.generate_unique_file_name(file.filename,project_id)
-    try:
-         async with aiofiles.open(file_path,'wb') as out_file:
-            while chunk:=await file.read(app_settings.FILE_DEFAULT_CHUNK_SIZE):
-                await out_file.write(chunk)
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={
-            "message":"Failed to upload file.",
-            "error":str(e),
-            "status":"error"
-        })
-    return JSONResponse(
-        content={
-            "message":f"File uploaded successfully to project {project_id}",
-            "file_name":file_name,
-            "file_size":valid_file.get("file_size",0) / app_settings.FILE_BYTES_TO_MB,
-            "status":"success"
-        }
-    )
+    project_model=await ProjectModel.create_instance(db_client=request.app.state.db_client)
+    asset_model=await AssetModel.create_instance(db_client=request.app.state.db_client)
+    await project_model.get_project_or_create_one(project_id=project_id)
+    uploaded_assets = []
 
+    for file in files:
+        valid_file = await data_controller.validate_file(file)
+        if not valid_file.get("is_type_valid") or not valid_file.get("is_size_valid"):
+            raise HTTPException(status_code=400, detail=f"Invalid file: {file.filename}")
+
+        try:
+            created_asset = await data_controller.save_and_record_asset(
+                file, project_id, asset_model, app_settings
+            )
+            uploaded_assets.append({
+                "file_name": created_asset.name,
+                "file_id": created_asset.name
+            })
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to upload {file.filename}: {str(e)}")
+        
+    return JSONResponse(content={
+        "message": f"Successfully uploaded {len(uploaded_assets)} files",
+        "files": uploaded_assets,
+        "status": "success"
+    })
 
 
 
 @data_router.post("/process/{project_id}",status_code=status.HTTP_200_OK)
-async def process_data(project_id:str,request:processRequest):
-    file_id=request.file_id
-    chunk_size=request.chunk_size
-    chunk_overlap=request.chunk_overlap
+async def process_data(
+        request: Request,
+        project_id: str, 
+        process_request: ProcessRequest
+    ):
+    db = request.app.state.db_client
+    chunk_model = await ChunkModel.create_instance(db_client=db)
+    project_model = await ProjectModel.create_instance(db_client=db)
+    
+    project = await project_model.get_project_or_create_one(project_id=project_id)
 
-    process_controller=ProcessController(project_id=project_id)
-    file_content=process_controller.load_document(file_id=file_id)
-    chunks, file_texts, file_metadata=process_controller.process_document(
-        file_content=file_content,
-        file_id=file_id,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
+    project_files_ids = []
+    
+    if process_request.file_ids:  
+        project_files_ids = process_request.file_ids
+    elif process_request.file_id:
+        project_files_ids = [process_request.file_id]
+    else:                
+        asset_model = await AssetModel.create_instance(db_client=db)
+        project_assets = await asset_model.get_assets_by_project_id(project_id=project_id)
+        project_files_ids = [str(asset.name) for asset in project_assets]
+
+    if not project_files_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "No files found for processing.", "status": "error"}
         )
-    if chunks is None or file_texts is None or file_metadata is None :
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail={
-            "message":"Failed to process document.",
-            "status":"error"
-        })
+    
+    if process_request.do_reset:
+        await chunk_model.delete_chunks_by_project_id(project_id=project_id)
+    
+    process_controller = ProcessController(project_id=project_id)
+    results = []
+    errors = []
+
+    for f_id in project_files_ids:
+        try:
+            count = await process_controller.process_one_file(
+                chunk_model=chunk_model,
+                file_id=f_id,
+                chunk_size=process_request.chunk_size,
+                chunk_overlap=process_request.chunk_overlap,
+            )
+            
+            if count is None:
+                errors.append({"file_id": f_id, "error": "Processor returned None"})
+            else:
+                results.append({"file_id": f_id, "chunks_count": count})
+                
+        except Exception as e:
+            errors.append({"file_id": f_id, "error": str(e)})
 
     return JSONResponse(
         content={
-            "file_id":file_id,
-            "chunks_count":len(chunks),
-            "file_texts":file_texts,
-            "file_metadata":file_metadata,
-            "status":"success"
+            "file_count": len(results),
+            "total_chunks_count": sum(r["chunks_count"] for r in results),
+            "errors_count": len(errors),
+            "errors": errors,
+            "status": "success" if not errors else "partial_success"
         }
     )
