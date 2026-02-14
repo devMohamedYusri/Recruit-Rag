@@ -42,10 +42,11 @@ class AssetModel(BaseDataModel):
             return Asset(**record)
         return None
     
-    async def get_all_project_asset(self,project_id:str):
-        return await self.collection.find({
+    async def get_assets_by_project_id(self,project_id:str):
+        records = await self.collection.find({
             "project_id":ObjectId(project_id) if ObjectId.is_valid(project_id) else project_id
         }).to_list(length=None)
+        return [Asset(**record) for record in records]
     
     async def delete_asset_by_id(self,asset_id:str):
         result=await self.collection.delete_one({
