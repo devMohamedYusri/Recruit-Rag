@@ -1,5 +1,9 @@
 import os
 import uuid
+import aiofiles
+from models import AssetModel
+from models.DB_schemas.asset import Asset
+from utils.config import Settings
 from .BaseController import BaseController
 from fastapi import UploadFile
 from .ProjectController import ProjectController
@@ -36,3 +40,19 @@ class DataController(BaseController):
         project_path=project_controller.get_project_asset_path(project_id)
         file_path = os.path.join(project_path, new_file_name)
         return file_path,new_file_name
+    
+    async def save_and_record_asset(self, file:UploadFile, project_id:str, asset_model:AssetModel, app_settings:Settings):
+        await file.seek(0)
+        file_path, file_name = self.generate_unique_file_name(file.filename, project_id)
+        async with aiofiles.open(file_path, 'wb') as out_file:
+            while chunk := await file.read(app_settings.FILE_DEFAULT_CHUNK_SIZE):
+                await out_file.write(chunk)
+        
+        asset_record = Asset(
+            project_id=project_id,
+            name=file_name,
+            type=file.content_type,
+            size_in_bytes=os.path.getsize(file_path),
+            url=file_path
+        )
+        return await asset_model.create_asset(asset_record)
