@@ -1,5 +1,4 @@
 from .providers.GeminiProvider import GeminiProvider
-from .providers.GroqProvider import GroqProvider
 from .LLMConfig import LLMConfig
 
 
@@ -15,14 +14,15 @@ class LLMProviderFactory:
                 model_id=self.config.GENERATION_MODEL_ID,
                 api_key=self.config.GEMINI_API_KEY,
                 embedding_model_id=self.config.EMBEDDING_MODEL_ID,
-                embedding_dimention=self.config.EMBEDDING_MODEL_SIZE,
+                embedding_dimension=self.config.EMBEDDING_MODEL_SIZE,
             )
         elif provider_key == LLMConfig.PROVIDER_GROQ:
-            return GroqProvider(
-                model_id=self.config.GENERATION_MODEL_ID,
-                api_key=self.config.GROQ_API_KEY,
-                embedding_model_id=self.config.EMBEDDING_MODEL_ID,
-                embedding_dimention=self.config.EMBEDDING_MODEL_SIZE,
-            )
+            raise NotImplementedError(f"Groq provider is not implemented yet")
+            # return GroqProvider(
+            #     model_id=self.config.GENERATION_MODEL_ID,
+            #     api_key=self.config.GROQ_API_KEY,
+            #     embedding_model_id=self.config.EMBEDDING_MODEL_ID,
+            #     embedding_dimension=self.config.EMBEDDING_MODEL_SIZE,
+            # )
         else:
             raise ValueError(f"Invalid LLM provider: '{provider}'")

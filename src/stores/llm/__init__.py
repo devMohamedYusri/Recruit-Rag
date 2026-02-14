@@ -1,2 +1,2 @@
 from .LLMProviderFactory import LLMProviderFactory
-from .providers import GeminiProvider, GroqProvider
+from .providers import GeminiProvider

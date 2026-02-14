@@ -10,5 +10,5 @@ class BaseDataModel:
         for key, value in kwargs.items():
             setattr(self, key, value)
     
-    async def count_documents(self, filter: dict = {}):
-        return await self.collection.count_documents(filter)
+    async def count_documents(self, filter: dict = None):
+        return await self.collection.count_documents(filter or {})

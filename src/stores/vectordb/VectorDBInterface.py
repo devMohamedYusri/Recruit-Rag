@@ -29,3 +29,45 @@ class VectorDBInterface(ABC):
         Essential for when a candidate withdraws their application.
         """
         pass
+
+
+    @abstractmethod
+    async def create_collection(self, collection_name: str, embedding_dim: int):
+        """Create a named collection if it does not already exist."""
+        pass
+
+    @abstractmethod
+    async def delete_collection(self, collection_name: str):
+        """Delete an entire collection by name."""
+        pass
+
+    @abstractmethod
+    async def get_collection_info(self, collection_name: str) -> dict:
+        """Return metadata about a collection."""
+        pass
+
+    @abstractmethod
+    async def upsert_to_collection(
+        self,
+        collection_name: str,
+        vectors: List[List[float]],
+        metadata: List[Dict[str, Any]],
+        texts: List[str],
+    ):
+        """Upsert pre-embedded vectors into a specific collection."""
+        pass
+
+    @abstractmethod
+    async def search_collection(
+        self,
+        collection_name: str,
+        query_vector: List[float],
+        k: int = 5,
+    ) -> List[SearchResult]:
+        """Search a specific collection by vector similarity."""
+        pass
+
+    @abstractmethod
+    async def delete_points(self, collection_name: str, point_ids: List[str]):
+        """Delete specific points from a collection."""
+        pass

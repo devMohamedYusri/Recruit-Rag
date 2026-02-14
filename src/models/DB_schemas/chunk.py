@@ -9,7 +9,7 @@ class Chunk(BaseModel):
     chunk_order:int =Field(...,gt=0)
     project_id: str=Field(...,min_length=1)
     def __str__(self):
-        return f"Chunk(_id={self._id}, project_id={self.project_id}, content={self.content}, metadata={self.metadata}, chunk_order={self.chunk_order})"
+        return f"Chunk(id={self.id}, project_id={self.project_id}, content={self.content}, metadata={self.metadata}, chunk_order={self.chunk_order})"
     
     @classmethod
     def get_indexes(cls):

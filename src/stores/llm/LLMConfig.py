@@ -6,7 +6,7 @@ class LLMConfig:
     PROVIDER_GROQ = "groq"
 
     # ── Default Model Settings ───────────────────────────────────
-    DEFAULT_GEMINI_MODEL: str = "gemini-2.0-flash"
+    DEFAULT_GEMINI_MODEL: str = "gemini-3-pro-preview"
     DEFAULT_GROQ_MODEL: str = "llama-3.1-8b-instant"
     DEFAULT_EMBEDDING_MODEL: str = "gemini-embedding-001"
     DEFAULT_EMBEDDING_DIMENSION: int = 768
@@ -22,6 +22,11 @@ class LLMConfig:
 
     # ── Gemini Model Catalog ─────────────────────────────────────
     GEMINI_MODELS: dict[str, str] = {
-        "gemini-1.5-pro": "gemini-1.5-pro",              # More context
-        "gemini-3-pro-preview": "Gemini-3-Pro-Preview",  # Reasoning
+        "gemini-2.5-pro":        "gemini-2.5-pro",          # Best reasoning, long context
+        "gemini-2.5-flash":      "gemini-2.5-flash",        # Fast + cost-efficient
+        "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",   # Budget, high-throughput
+        "gemini-2.0-flash":      "gemini-2.0-flash",        # Fast multimodal
+        "gemini-1.5-flash":      "gemini-1.5-flash",        # Legacy, large context
+        "gemini-1.5-pro":        "gemini-1.5-pro",          # Legacy, more capable
+        "gemini-3-pro-preview":  "gemini-3-pro-preview",    # Latest preview
     }

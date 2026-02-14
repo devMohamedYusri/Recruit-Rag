@@ -5,6 +5,7 @@ from utils import get_settings
 from stores import LLMProviderFactory
 from contextlib import asynccontextmanager
 from stores import VectorDBFactory
+from routes import vector_router
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -17,17 +18,12 @@ async def lifespan(app:FastAPI):
     app.state.embedding_client=app.state.llm_provider_factory.create(settings.EMBEDDING_BACKEND)
 
     app.state.vector_db_factory=VectorDBFactory(settings)
-    app.state.vector_db=app.state.vector_db_factory.create_vector_db(
-        vector_db_type=settings.VECTOR_DB_TYPE,
-        collection_name=settings.VECTOR_DB_COLLECTION_NAME,
-        embedding_dim=settings.EMBEDDING_MODEL_SIZE,
-        distance=settings.VECTOR_DB_DISTANCE,
-    )
+    app.state.vector_db=app.state.vector_db_factory.create_vector_db()
     await app.state.vector_db.initialize()
     try:
         yield
     finally:
-        app.state.mongodb_conn.close()
+        await app.state.mongodb_conn.close()
         app.state.llm_provider_factory=None
         app.state.generation_client=None
         app.state.embedding_client=None
@@ -37,3 +33,4 @@ app = FastAPI(lifespan=lifespan)
 
 app.include_router(base_router)
 app.include_router(data_router)
+app.include_router(vector_router)
