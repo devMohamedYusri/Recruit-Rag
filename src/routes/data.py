@@ -1,11 +1,10 @@
 from fastapi import APIRouter,Depends,UploadFile,HTTPException,status,Request
 from fastapi.responses import JSONResponse
 from utils import get_settings,Settings
-from controllers import DataController,ProjectController,ProcessController
-from .schema import processRequest
+from controllers import DataController,ProcessController
+from .schema import ProcessRequest
 from models import ProjectModel,ChunkModel,AssetModel
 data_controller=DataController()
-project_controller=ProjectController()
 
 data_router=APIRouter(
     prefix="/api/v1/data",
@@ -13,8 +12,12 @@ data_router=APIRouter(
 )
 
 @data_router.post("/upload/{project_id}",status_code=status.HTTP_201_CREATED)
-async def upload_data(request:Request,project_id:str,files: list[UploadFile],
-                app_settings:Settings=Depends(get_settings)):
+async def upload_data(
+    request:Request,
+    project_id:str,
+    files: list[UploadFile],
+    app_settings:Settings=Depends(get_settings)
+):
     
     project_model=await ProjectModel.create_instance(db_client=request.app.state.db_client)
     asset_model=await AssetModel.create_instance(db_client=request.app.state.db_client)
@@ -32,7 +35,7 @@ async def upload_data(request:Request,project_id:str,files: list[UploadFile],
             )
             uploaded_assets.append({
                 "file_name": created_asset.name,
-                "file_id": str(created_asset.id)
+                "file_id": created_asset.name
             })
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to upload {file.filename}: {str(e)}")
@@ -46,8 +49,12 @@ async def upload_data(request:Request,project_id:str,files: list[UploadFile],
 
 
 @data_router.post("/process/{project_id}",status_code=status.HTTP_200_OK)
-async def process_data(requests: Request, project_id: str, request: processRequest):
-    db = requests.app.state.db_client
+async def process_data(
+        request: Request,
+        project_id: str, 
+        process_request: ProcessRequest
+    ):
+    db = request.app.state.db_client
     chunk_model = await ChunkModel.create_instance(db_client=db)
     project_model = await ProjectModel.create_instance(db_client=db)
     
@@ -55,10 +62,10 @@ async def process_data(requests: Request, project_id: str, request: processReque
 
     project_files_ids = []
     
-    if request.file_ids:  
-        project_files_ids = request.file_ids
-    elif request.file_id:
-        project_files_ids = [request.file_id]
+    if process_request.file_ids:  
+        project_files_ids = process_request.file_ids
+    elif process_request.file_id:
+        project_files_ids = [process_request.file_id]
     else:                
         asset_model = await AssetModel.create_instance(db_client=db)
         project_assets = await asset_model.get_assets_by_project_id(project_id=project_id)
@@ -70,7 +77,7 @@ async def process_data(requests: Request, project_id: str, request: processReque
             detail={"message": "No files found for processing.", "status": "error"}
         )
     
-    if request.do_reset:
+    if process_request.do_reset:
         await chunk_model.delete_chunks_by_project_id(project_id=project_id)
     
     process_controller = ProcessController(project_id=project_id)
@@ -82,8 +89,8 @@ async def process_data(requests: Request, project_id: str, request: processReque
             count = await process_controller.process_one_file(
                 chunk_model=chunk_model,
                 file_id=f_id,
-                chunk_size=request.chunk_size,
-                chunk_overlap=request.chunk_overlap,
+                chunk_size=process_request.chunk_size,
+                chunk_overlap=process_request.chunk_overlap,
             )
             
             if count is None:

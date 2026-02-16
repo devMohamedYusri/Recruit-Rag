@@ -1,21 +1,21 @@
 from typing import Optional, Dict, Any
 from google import genai
 from google.genai import types
-from ...LLMInterface import LLMInterface
-from ...LLMConfig import LLMConfig
+from ..LLMInterface import LLMInterface
 import logging
+import numpy as np
 
 class GeminiProvider(LLMInterface):
     def __init__(self,
         api_key: str, 
         model_id: str = "gemini-2.0-flash",
         embedding_model_id: str = "gemini-embedding-001",
-        embedding_dimention: int = 768
+        embedding_dimension: int = 768
      ):
         self.api_key = api_key
         self.model_id = model_id 
         self.embedding_model_id=embedding_model_id
-        self.embedding_dimention=embedding_dimention
+        self.embedding_dimension=embedding_dimension
 
         if not self.api_key:
             raise ValueError("Google API key is required")
@@ -72,7 +72,7 @@ class GeminiProvider(LLMInterface):
                 config=types.EmbedContentConfig(
                     task_type="RETRIEVAL_DOCUMENT", 
                     title="Resume Snippet",
-                    output_dimensionality=self.embedding_dimention
+                    output_dimensionality=self.embedding_dimension
                 )
             )
             
@@ -89,23 +89,23 @@ class GeminiProvider(LLMInterface):
             print(f"Embedding Doc Error: {e}")
             return []
 
-async def embed_query(self, text):
-    try:
-        response = await self.client.aio.models.embed_content(
-            model=self.embedding_model_id,
-            contents=text,
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_QUERY",
-                output_dimensionality=self.embedding_dimention
+    async def embed_query(self, text):
+        try:
+            response = await self.client.aio.models.embed_content(
+                model=self.embedding_model_id,
+                contents=text,
+                config=types.EmbedContentConfig(
+                    task_type="RETRIEVAL_QUERY",
+                    output_dimensionality=self.embedding_dimension
+                )
             )
-        )
-        
-        v = np.array(response.embeddings[0].values)
-        norm = np.linalg.norm(v)
-        if norm > 0:
-            v = v / norm
             
-        return v.tolist()
-    except Exception as e:
-        print(f"Embedding Query Error: {e}")
-        return []
+            v = np.array(response.embeddings[0].values)
+            norm = np.linalg.norm(v)
+            if norm > 0:
+                v = v / norm
+                
+            return v.tolist()
+        except Exception as e:
+            self.logger.error(f"Embedding Query Error: {e}")
+            raise RuntimeError(f"Failed to embed query: {str(e)}")

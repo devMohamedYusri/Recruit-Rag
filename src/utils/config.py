@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     ASSETS_COLLECTION: str = Field(default="ASSETS_COLLECTION")
 
     # ── LLM Configuration ────────────────────────────────────────────────
-    GENERATION_BACKEND: str = Field(default="GEMINI-FLASH")
-    EMBEDDING_BACKEND: str = Field(default="GROQ")
+    GENERATION_BACKEND: str = Field(default="gemini")
+    EMBEDDING_BACKEND: str = Field(default="groq")
 
     GENERATION_MODEL_ID: str = Field(default="llama-3.3-70b-versatile")
     EMBEDDING_MODEL_ID: str = Field(default="gemini-embedding-001")
@@ -43,8 +43,14 @@ class Settings(BaseSettings):
     # ── API Keys ─────────────────────────────────────────────────────────
     GROQ_API_KEY: str = Field(default="")
     GEMINI_API_KEY: str = Field(default="")
-    GROQ:str="groq"
-    GEMINI:str="gemini"
+
+    # ── Vector DB Configuration ────────────────────────────────────────
+    VECTOR_DB_TYPE: str = Field(default="QDRANT")
+    DB_DIRECTORY: str = Field(default="assets/database")
+    VECTOR_DB_NAME: str = Field(default="vector_db")
+    VECTOR_DB_DISTANCE: str = Field(default="cosine")
+    VECTOR_DB_COLLECTION_NAME: str = Field(default="chunks")
+
 
 
 @lru_cache()

@@ -52,9 +52,22 @@ class ChunkModel(BaseDataModel):
             Operations=[InsertOne(data) for data in data_batch]
             await self.collection.bulk_write(Operations)
         return len(chunks)
-    async def delete_chunks_by_project_id(self,project_id:ObjectId):
+    async def delete_chunks_by_project_id(self,project_id:str):
         result=await self.collection.delete_many({
-            "project_id":project_id
+            "project_id":ObjectId(project_id) if ObjectId.is_valid(project_id) else project_id
         })
         return result.deleted_count
-        
+
+    async def get_chunks_by_project_id(self, project_id: str, page: int = 1, limit: int = 40):
+        query = {
+            "project_id": ObjectId(project_id) if ObjectId.is_valid(project_id) else project_id
+        }
+        cursor = self.collection.find(query)
+        if limit > 0:
+            skip = (page - 1) * limit
+            cursor = cursor.skip(skip).limit(limit)
+        records = await cursor.to_list(length=limit if limit > 0 else None)
+        return [
+            Chunk(**record) 
+            for record in records
+        ]

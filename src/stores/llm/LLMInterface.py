@@ -3,7 +3,7 @@ from typing import Dict,Optional,Any
 
 class LLMInterface(ABC):
     @abstractmethod
-    def generate(self,prompt:str,config:Optional[Dict[str,Any]]=None):
+    async def generate(self,prompt:str,config:Optional[Dict[str,Any]]=None):
         """
         Generates text.
         'config' can override model_id or temperature at runtime.
@@ -11,14 +11,14 @@ class LLMInterface(ABC):
         pass
     
     @abstractmethod
-    def embed_documents(self,texts:list[str]):
+    async def embed_documents(self,texts:list[str]):
         """
         Embeds a list of texts for storage (Database).
         """
         pass
     
     @abstractmethod
-    def embed_query(self,text:str):
+    async def embed_query(self,text:str):
         """
         Embeds a single query for searching (Retrieval).
         """
