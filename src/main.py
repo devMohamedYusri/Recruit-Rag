@@ -6,6 +6,7 @@ from stores import LLMProviderFactory
 from contextlib import asynccontextmanager
 from stores import VectorDBFactory
 from routes import vector_router
+from routes import llm_router
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -34,3 +35,4 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(base_router)
 app.include_router(data_router)
 app.include_router(vector_router)
+app.include_router(llm_router)

@@ -20,3 +20,7 @@ class Chunk(BaseModel):
                 "unique":False
             },
         ]
+ 
+class retrieved_chunk(BaseModel):
+    chunk:Chunk
+    score:float

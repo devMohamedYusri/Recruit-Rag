@@ -2,41 +2,46 @@ from typing import Optional, Dict, Any
 from google import genai
 from google.genai import types
 from ..LLMInterface import LLMInterface
+from utils.prompts import RESUME_STRUCTURE_PROMPT
 import logging
 import numpy as np
+import json
+import time
+import pathlib
+
 
 class GeminiProvider(LLMInterface):
     def __init__(self,
-        api_key: str, 
-        model_id: str = "gemini-2.0-flash",
+        api_key: str,
+        model_id: str = "gemini-1.5-flash",
         embedding_model_id: str = "gemini-embedding-001",
         embedding_dimension: int = 768
      ):
         self.api_key = api_key
-        self.model_id = model_id 
-        self.embedding_model_id=embedding_model_id
-        self.embedding_dimension=embedding_dimension
+        self.model_id = model_id
+        self.embedding_model_id = embedding_model_id
+        self.embedding_dimension = embedding_dimension
 
         if not self.api_key:
             raise ValueError("Google API key is required")
-            
+
         self.client = genai.Client(api_key=self.api_key)
-        
+
         self.default_config = {
-            "max_output_tokens": 2048, 
+            "max_output_tokens": 2048,
             "temperature": 0.1,
             "top_p": 0.9
         }
-        self.logger=logging.getLogger(__name__)
+        self.logger = logging.getLogger(__name__)
 
     async def generate(self, prompt: str, config: Optional[Dict[str, Any]] = None) -> str:
         if not self.client:
-           self.logger.error("genai client was not set")
-           return None
+            self.logger.error("genai client was not set")
+            return None
         if not self.model_id:
-           self.logger.error("generation model was not set")
-           return None
-        
+            self.logger.error("generation model was not set")
+            return None
+
         final_config_dict = self.default_config.copy()
         if config:
             if "max_tokens" in config:
@@ -51,13 +56,11 @@ class GeminiProvider(LLMInterface):
                 contents=prompt,
                 config=generation_config
             )
-            
             return response.text
-            
         except Exception as e:
-            print(f"Gemini Error: {e}") 
+            self.logger.error(f"Gemini generation error: {e}")
             raise RuntimeError(f"Failed to generate content: {str(e)}")
-        
+
     async def embed_documents(self, texts):
         if not self.client:
             self.logger.error("genai client was not set")
@@ -70,12 +73,12 @@ class GeminiProvider(LLMInterface):
                 model=self.embedding_model_id,
                 contents=texts,
                 config=types.EmbedContentConfig(
-                    task_type="RETRIEVAL_DOCUMENT", 
+                    task_type="RETRIEVAL_DOCUMENT",
                     title="Resume Snippet",
                     output_dimensionality=self.embedding_dimension
                 )
             )
-            
+
             embeddings = []
             for emb in response.embeddings:
                 v = np.array(emb.values)
@@ -83,10 +86,10 @@ class GeminiProvider(LLMInterface):
                 if norm > 0:
                     v = v / norm
                 embeddings.append(v.tolist())
-                
+
             return embeddings
         except Exception as e:
-            print(f"Embedding Doc Error: {e}")
+            self.logger.error(f"Embedding doc error: {e}")
             return []
 
     async def embed_query(self, text):
@@ -99,13 +102,97 @@ class GeminiProvider(LLMInterface):
                     output_dimensionality=self.embedding_dimension
                 )
             )
-            
+
             v = np.array(response.embeddings[0].values)
             norm = np.linalg.norm(v)
             if norm > 0:
                 v = v / norm
-                
+
             return v.tolist()
         except Exception as e:
-            self.logger.error(f"Embedding Query Error: {e}")
+            self.logger.error(f"Embedding query error: {e}")
             raise RuntimeError(f"Failed to embed query: {str(e)}")
+
+    async def upload_file(self, file_path: str, mime_type: str):
+        """Upload a file to Gemini's File API (used for fallback extraction)."""
+        try:
+            file_ref = self.client.files.upload(
+                file=pathlib.Path(file_path),
+                config={"mime_type": mime_type}
+            )
+            while file_ref.state and file_ref.state.name == "PROCESSING":
+                time.sleep(1)
+                file_ref = self.client.files.get(name=file_ref.name)
+
+            if file_ref.state and file_ref.state.name == "FAILED":
+                raise RuntimeError(f"File processing failed for {file_path}")
+
+            self.logger.info(f"File uploaded: {file_ref.name}")
+            return file_ref
+        except Exception as e:
+            self.logger.error(f"File upload error: {e}")
+            raise RuntimeError(f"Failed to upload file: {str(e)}")
+
+    async def extract_structured_resume(self, file_ref) -> dict:
+        """Fallback: extract and structure a resume directly from an uploaded file."""
+        try:
+            prompt = RESUME_STRUCTURE_PROMPT + "\n\nExtract the resume from the uploaded document."
+
+            response = await self.client.aio.models.generate_content(
+                model=self.model_id,
+                contents=[file_ref, prompt],
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=4096,
+                    response_mime_type="application/json"
+                )
+            )
+
+            result = json.loads(response.text)
+            # If result is a list (batch response), take the first
+            if isinstance(result, list):
+                result = result[0]
+            return result
+        except Exception as e:
+            self.logger.error(f"Fallback extraction error: {e}")
+            raise RuntimeError(f"Failed to extract resume via Gemini: {str(e)}")
+
+    async def structure_resume_batch(self, markdown_texts: list[str]) -> list[dict]:
+        """Structure 2-3 locally-parsed markdown CVs into parsed_data JSON."""
+        try:
+            labeled_resumes = []
+            for i, text in enumerate(markdown_texts):
+                labeled_resumes.append(f"=== RESUME {i+1} ===\n{text}\n=== END RESUME {i+1} ===")
+
+            combined = "\n\n".join(labeled_resumes)
+            prompt = (
+                RESUME_STRUCTURE_PROMPT
+                + f"\n\nThere are {len(markdown_texts)} resumes below. "
+                + f"Return a JSON array with {len(markdown_texts)} objects, one per resume, in the same order.\n\n"
+                + combined
+            )
+
+            response = await self.client.aio.models.generate_content(
+                model=self.model_id,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=8192,
+                    response_mime_type="application/json"
+                )
+            )
+
+            result = json.loads(response.text)
+            if not isinstance(result, list):
+                result = [result]
+
+            # Validate we got the right number of results
+            if len(result) != len(markdown_texts):
+                self.logger.warning(
+                    f"Expected {len(markdown_texts)} structured resumes, got {len(result)}"
+                )
+
+            return result
+        except Exception as e:
+            self.logger.error(f"Batch structuring error: {e}")
+            raise RuntimeError(f"Failed to structure resume batch: {str(e)}")

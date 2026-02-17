@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     PROJECTS_COLLECTION: str = Field(default="PROJECTS_COLLECTION")
     CHUNKS_COLLECTION: str = Field(default="CHUNKS_COLLECTION")
     ASSETS_COLLECTION: str = Field(default="ASSETS_COLLECTION")
+    RESUMES_COLLECTION: str = Field(default="RESUMES_COLLECTION")
+    JOB_DESCRIPTIONS_COLLECTION: str = Field(default="JOB_DESCRIPTIONS_COLLECTION")
 
     # ── LLM Configuration ────────────────────────────────────────────────
     GENERATION_BACKEND: str = Field(default="gemini")
@@ -39,6 +41,9 @@ class Settings(BaseSettings):
     GENERATION_MODEL_ID: str = Field(default="llama-3.3-70b-versatile")
     EMBEDDING_MODEL_ID: str = Field(default="gemini-embedding-001")
     EMBEDDING_MODEL_SIZE: int = Field(default=768)
+
+    # ── LLM Concurrency ──────────────────────────────────────────────────
+    LLM_CONCURRENCY_LIMIT: int = Field(default=50)
 
     # ── API Keys ─────────────────────────────────────────────────────────
     GROQ_API_KEY: str = Field(default="")
