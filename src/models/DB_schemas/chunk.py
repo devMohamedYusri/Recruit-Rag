@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field,BeforeValidator
 from typing import Annotated, Optional
+from .types import PyObjectId
 
-PyObjectId = Annotated[str, BeforeValidator(str)]
 class Chunk(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     content:str=Field(...,min_length=1)
@@ -21,6 +21,3 @@ class Chunk(BaseModel):
             },
         ]
  
-class retrieved_chunk(BaseModel):
-    chunk:Chunk
-    score:float

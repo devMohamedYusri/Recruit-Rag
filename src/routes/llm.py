@@ -85,7 +85,7 @@ async def process_resumes(
 
         file_ids = process_request.file_ids or []
 
-        result = await llm_controller.process_and_store_resumes(
+        result = await llm_controller.process_and_store(
             generation_client=generation_client,
             project_id=project_id,
             file_ids=file_ids,

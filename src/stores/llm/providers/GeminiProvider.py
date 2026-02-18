@@ -6,8 +6,8 @@ from utils.prompts import RESUME_STRUCTURE_PROMPT
 import logging
 import numpy as np
 import json
-import time
 import pathlib
+import asyncio
 
 
 class GeminiProvider(LLMInterface):
@@ -116,13 +116,18 @@ class GeminiProvider(LLMInterface):
     async def upload_file(self, file_path: str, mime_type: str):
         """Upload a file to Gemini's File API (used for fallback extraction)."""
         try:
-            file_ref = self.client.files.upload(
+            file_ref = await asyncio.to_thread(
+                self.client.files.upload,
                 file=pathlib.Path(file_path),
                 config={"mime_type": mime_type}
             )
+            
             while file_ref.state and file_ref.state.name == "PROCESSING":
-                time.sleep(1)
-                file_ref = self.client.files.get(name=file_ref.name)
+                await asyncio.sleep(1)
+                file_ref = await asyncio.to_thread(
+                    self.client.files.get,
+                    name=file_ref.name
+                )
 
             if file_ref.state and file_ref.state.name == "FAILED":
                 raise RuntimeError(f"File processing failed for {file_path}")

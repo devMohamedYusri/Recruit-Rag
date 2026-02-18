@@ -17,5 +17,5 @@ langchain-text-splitters==1.1.0
 pymongo==4.16.0
 qdrant-client==1.16.2
 groq==1.0.0
-cohere==5.20.4
+numpy==2.2.3
 google-genai==1.62.0

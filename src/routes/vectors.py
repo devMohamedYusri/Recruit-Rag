@@ -1,4 +1,4 @@
-from fastapi import APIRouter, status, Request
+from fastapi import APIRouter, status, Request, HTTPException
 from fastapi.responses import JSONResponse
 from controllers import VectorController
 from models import ProjectModel
@@ -41,9 +41,9 @@ async def info_vectors(
         )
     except Exception as e:
         logger.error(f"Error getting info for project {project_id}: {e}")
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"message": f"Failed to get collection info: {str(e)}"},
+            detail=f"Failed to get collection info: {str(e)}"
         )
 
 @vector_router.post("/search/{project_id}")
@@ -83,7 +83,7 @@ async def search_vectors(
         )
     except Exception as e:
         logger.error(f"Error searching vectors for project {project_id}: {e}")
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"message": f"Failed to search vectors: {str(e)}"},
+            detail=f"Failed to search vectors: {str(e)}"
         )

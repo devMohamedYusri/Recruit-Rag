@@ -1,9 +1,7 @@
 from pydantic import BaseModel, Field, BeforeValidator, ConfigDict
 from typing import Annotated, Optional
 from datetime import datetime
-
-PyObjectId = Annotated[str, BeforeValidator(str)]
-
+from .types import PyObjectId
 
 class JobDescription(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)

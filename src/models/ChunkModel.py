@@ -8,7 +8,6 @@ class ChunkModel(BaseDataModel):
     collection_setting_key:str="CHUNKS_COLLECTION"
     def __init__(self,db_client:object):
         super().__init__(db_client=db_client)
-        self.collection = self.db_client[self.collection_setting_key]
 
     @classmethod
     async def create_instance(cls,db_client:object):
@@ -49,8 +48,8 @@ class ChunkModel(BaseDataModel):
         for i in range(0,len(chunks),batch_size):
             batch=chunks[i:i+batch_size]
             data_batch=[chunk.model_dump(by_alias=True,exclude_none=True) for chunk in batch]
-            Operations=[InsertOne(data) for data in data_batch]
-            await self.collection.bulk_write(Operations)
+            operations=[InsertOne(data) for data in data_batch]
+            await self.collection.bulk_write(operations)
         return len(chunks)
     async def delete_chunks_by_project_id(self,project_id:str):
         result=await self.collection.delete_many({

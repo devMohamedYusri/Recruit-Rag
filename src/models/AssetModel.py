@@ -7,7 +7,6 @@ class AssetModel(BaseDataModel):
     collection_setting_key:str="ASSETS_COLLECTION"
     def __init__(self, db_client):
         super().__init__(db_client)
-        self.collection = self.db_client[self.collection_setting_key]
         
     @classmethod
     async def create_instance(cls,db_client:object):
