@@ -1,6 +1,6 @@
 import uuid
 from qdrant_client import AsyncQdrantClient, models
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from ..VectorDBInterface import VectorDBInterface, SearchResult
 from ..VectorDBEnums import DistanceMetric, VectorDBConfig
 

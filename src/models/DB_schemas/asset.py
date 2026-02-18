@@ -1,8 +1,8 @@
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
-from typing import Annotated, Optional
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Optional
 from datetime import datetime
+from .types import PyObjectId
 
-PyObjectId = Annotated[str, BeforeValidator(str)]
 class Asset(BaseModel):
     id: Optional[PyObjectId] = Field(None, alias="_id",description="Unique identifier for the asset")
     project_id: str = Field(None, description="Reference to the associated asset project")

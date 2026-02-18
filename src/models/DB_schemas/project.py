@@ -1,7 +1,7 @@
-from pydantic import BaseModel, BeforeValidator, Field, field_validator, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Annotated, Optional
+from .types import PyObjectId
 
-PyObjectId = Annotated[str, BeforeValidator(str)]
 class Project(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     project_id: str=Field(min_length=1)

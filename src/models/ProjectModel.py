@@ -6,7 +6,6 @@ class ProjectModel(BaseDataModel):
     collection_setting_key:str="PROJECTS_COLLECTION"
     def __init__(self,db_client:object):
         super().__init__(db_client=db_client)
-        self.collection = self.db_client[self.collection_setting_key]
 
     @classmethod
     async def create_instance(cls,db_client:object):
@@ -46,6 +45,7 @@ class ProjectModel(BaseDataModel):
         })
         if record:
             return Project(**record)
+        return None
     async def delete_project_by_id(self,project_id:str):
         result=await self.collection.delete_one({
             "project_id":project_id

@@ -32,7 +32,7 @@ class DataController(BaseController):
                 "is_valid":is_type_valid and is_size_valid
             }
 
-    def generate_unique_file_name(self, original_file_name: str, project_id: str) -> str:
+    def generate_unique_file_name(self, original_file_name: str, project_id: str) -> tuple[str, str]:
         extension = original_file_name.split(".")[-1]
         unique_id = str(uuid.uuid4())
         new_file_name = f"{project_id}_{unique_id}.{extension}"
