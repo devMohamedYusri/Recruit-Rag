@@ -19,6 +19,32 @@ llm_router = APIRouter(
 )
 
 
+# ── Dependency Helpers ───────────────────────────────────────────────────
+
+async def _get_models(db_client) -> dict:
+    """Instantiate all common data models in one call."""
+    return {
+        "project_model": await ProjectModel.create_instance(db_client),
+        "resume_model": await ResumeModel.create_instance(db_client),
+        "jd_model": await JobDescriptionModel.create_instance(db_client),
+        "chunk_model": await ChunkModel.create_instance(db_client),
+        "asset_model": await AssetModel.create_instance(db_client),
+        "usage_controller": UsageController(
+            await UsageLogModel.create_instance(db_client)
+        ),
+    }
+
+
+def _get_vector_controller(request: Request) -> VectorController:
+    """Build a VectorController from app state."""
+    return VectorController(
+        vector_client=request.app.state.vector_db,
+        embedding_model=request.app.state.embedding_client,
+    )
+
+
+# ── Routes ───────────────────────────────────────────────────────────────
+
 @llm_router.post("/job-description/{project_id}", status_code=status.HTTP_201_CREATED)
 async def create_job_description(
     request: Request,
@@ -63,67 +89,36 @@ async def process_resumes(
     project_id: str,
     process_request: ProcessResumesRequest,
 ):
-
     """Extract, structure, chunk, and vectorize resumes for a project."""
     try:
         settings = get_settings()
         generation_client = request.app.state.generation_client
-        
-        # Instantiate factory to get extraction client
-        llm_factory = LLMProviderFactory(settings)
-        extraction_client = llm_factory.create(
+
+        extraction_client = LLMProviderFactory(settings).create(
             provider=settings.GENERATION_BACKEND,
             model_id=settings.CV_EXTRACTION_MODEL_ID
         )
 
-        project_model = await ProjectModel.create_instance(
-            db_client=request.app.state.db_client
-        )
-        resume_model = await ResumeModel.create_instance(
-            db_client=request.app.state.db_client
-        )
-        chunk_model = await ChunkModel.create_instance(
-            db_client=request.app.state.db_client
-        )
-        asset_model = await AssetModel.create_instance(
-            db_client=request.app.state.db_client
-        )
-        usage_model = await UsageLogModel.create_instance(
-            db_client=request.app.state.db_client
-        )
-        usage_controller = UsageController(usage_model)
-
-        project = await project_model.get_project_or_create_one(project_id)
-
-        vector_db = request.app.state.vector_db
-        embedding_client = request.app.state.embedding_client
-        vector_controller = VectorController(
-            vector_client=vector_db,
-            embedding_model=embedding_client,
-        )
-
-        file_ids = process_request.file_ids or []
+        deps = await _get_models(request.app.state.db_client)
+        vector_controller = _get_vector_controller(request)
+        project = await deps["project_model"].get_project_or_create_one(project_id)
 
         result = await llm_controller.process_and_store(
             generation_client=generation_client,
             project_id=project_id,
-            file_ids=file_ids,
-            resume_model=resume_model,
-            chunk_model=chunk_model,
-            asset_model=asset_model,
+            file_ids=process_request.file_ids or [],
+            resume_model=deps["resume_model"],
+            chunk_model=deps["chunk_model"],
+            asset_model=deps["asset_model"],
             vector_controller=vector_controller,
             project=project,
             do_reset=process_request.do_reset,
-            extraction_client=extraction_client, # Pass extraction client
-            usage_controller=usage_controller
+            extraction_client=extraction_client,
+            usage_controller=deps["usage_controller"]
         )
 
         return JSONResponse(
-            content={
-                "signal": "resumes_processed",
-                "project_id": project_id,
-                **result
-            },
+            content={"signal": "resumes_processed", "project_id": project_id, **result},
             status_code=status.HTTP_200_OK
         )
     except Exception as e:
@@ -145,64 +140,38 @@ async def screen_candidates(
     """Screen all (or selected) CVs against the project's job description."""
     try:
         generation_client = request.app.state.generation_client
-        resume_model = await ResumeModel.create_instance(request.app.state.db_client)
-        jd_model = await JobDescriptionModel.create_instance(request.app.state.db_client)
-        project_model = await ProjectModel.create_instance(request.app.state.db_client)
-        usage_model = await UsageLogModel.create_instance(request.app.state.db_client)
-        usage_controller = UsageController(usage_model)
-        
-        # Instantiate dependencies
-        embedding_client = request.app.state.embedding_client
-        vector_db = request.app.state.vector_db
-        vector_controller = VectorController(vector_db, embedding_client)
+        deps = await _get_models(request.app.state.db_client)
+        vector_controller = _get_vector_controller(request)
+
+        common_args = {
+            "generation_client": generation_client,
+            "resume_model": deps["resume_model"],
+            "jd_model": deps["jd_model"],
+            "project_id": project_id,
+            "file_ids": screen_request.file_ids,
+            "anonymize": screen_request.anonymize,
+            "usage_controller": deps["usage_controller"],
+        }
+
+        smart_args = {
+            **common_args,
+            "vector_controller": vector_controller,
+            "project_model": deps["project_model"],
+        }
 
         if stream:
-            if smart_screen:
-                generator = llm_controller.smart_screen_candidates_stream(
-                    generation_client=generation_client,
-                    resume_model=resume_model,
-                    vector_controller=vector_controller,
-                    jd_model=jd_model,
-                    project_model=project_model,
-                    project_id=project_id,
-                    file_ids=screen_request.file_ids,
-                    anonymize=screen_request.anonymize,
-                    usage_controller=usage_controller
-                )
-            else:
-                generator = llm_controller.screen_candidates_stream(
-                    generation_client=generation_client,
-                    resume_model=resume_model,
-                    jd_model=jd_model,
-                    project_id=project_id,
-                    file_ids=screen_request.file_ids,
-                    anonymize=screen_request.anonymize,
-                    usage_controller=usage_controller
-                )
+            generator = (
+                llm_controller.smart_screen_candidates_stream(**smart_args)
+                if smart_screen
+                else llm_controller.screen_candidates_stream(**common_args)
+            )
             return StreamingResponse(generator, media_type="application/x-ndjson")
 
-        if smart_screen:
-            results = await llm_controller.smart_screen_candidates(
-                generation_client=generation_client,
-                resume_model=resume_model,
-                vector_controller=vector_controller,
-                jd_model=jd_model,
-                project_model=project_model,
-                project_id=project_id,
-                file_ids=screen_request.file_ids,
-                anonymize=screen_request.anonymize,
-                usage_controller=usage_controller
-            )
-        else:
-            results = await llm_controller.screen_candidates(
-                generation_client=generation_client,
-                resume_model=resume_model,
-                jd_model=jd_model,
-                project_id=project_id,
-                file_ids=screen_request.file_ids,
-                anonymize=screen_request.anonymize,
-                usage_controller=usage_controller
-            )
+        results = (
+            await llm_controller.smart_screen_candidates(**smart_args)
+            if smart_screen
+            else await llm_controller.screen_candidates(**common_args)
+        )
 
         return JSONResponse(
             content={
@@ -214,10 +183,7 @@ async def screen_candidates(
             status_code=status.HTTP_200_OK
         )
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except Exception as e:
         logger.error(f"Screening error: {e}")
         raise HTTPException(

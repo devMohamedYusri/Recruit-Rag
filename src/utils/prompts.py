@@ -65,3 +65,8 @@ RULES:
 - **CUSTOM INSTRUCTIONS**: If "CUSTOM EVALUATION RUBRIC" or "SCORING WEIGHTS" are provided, you MUST prioritize them over general HR guidelines.
 - Return ONLY the JSON, no markdown fences, no explanations.
 """
+
+
+JD_KEYWORD_EXTRACTION_PROMPT = """Extract 5-10 critical technical skills/keywords from this Job Description.
+Return ONLY a JSON array of strings.
+JD: {jd_text}"""

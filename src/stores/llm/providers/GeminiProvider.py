@@ -3,6 +3,7 @@ from google import genai
 from google.genai import types
 from ..LLMInterface import LLMInterface, LLMResponse
 from utils.prompts import RESUME_STRUCTURE_PROMPT
+from utils.constants import EXTRACTION_GENERATION_CONFIG, BATCH_STRUCTURING_GENERATION_CONFIG
 import logging
 import numpy as np
 import json
@@ -34,6 +35,17 @@ class GeminiProvider(LLMInterface):
         }
         self.logger = logging.getLogger(__name__)
 
+    @staticmethod
+    def _parse_usage_metadata(response) -> dict:
+        """Extract token usage from a Gemini API response."""
+        if not response.usage_metadata:
+            return {}
+        return {
+            "prompt_tokens": response.usage_metadata.prompt_token_count,
+            "completion_tokens": response.usage_metadata.candidates_token_count,
+            "total_tokens": response.usage_metadata.total_token_count
+        }
+
     async def generate(self, prompt: str, config: Optional[Dict[str, Any]] = None) -> LLMResponse:
         if not self.client:
             raise RuntimeError("genai client was not set")
@@ -54,15 +66,7 @@ class GeminiProvider(LLMInterface):
                 contents=prompt,
                 config=generation_config
             )
-            
-            usage = {}
-            if response.usage_metadata:
-                usage = {
-                    "prompt_tokens": response.usage_metadata.prompt_token_count,
-                    "completion_tokens": response.usage_metadata.candidates_token_count,
-                    "total_tokens": response.usage_metadata.total_token_count
-                }
-
+            usage = self._parse_usage_metadata(response)
             return LLMResponse(content=response.text, usage_metadata=usage)
         except Exception as e:
             self.logger.error(f"Gemini generation error: {e}")
@@ -151,26 +155,14 @@ class GeminiProvider(LLMInterface):
             response = await self.client.aio.models.generate_content(
                 model=self.model_id,
                 contents=[file_ref, prompt],
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=4096,
-                    response_mime_type="application/json"
-                )
+                config=types.GenerateContentConfig(**EXTRACTION_GENERATION_CONFIG)
             )
 
             result = json.loads(response.text)
-            # If result is a list (batch response), take the first
             if isinstance(result, list):
                 result = result[0]
-            
-            usage = {}
-            if response.usage_metadata:
-                usage = {
-                    "prompt_tokens": response.usage_metadata.prompt_token_count,
-                    "completion_tokens": response.usage_metadata.candidates_token_count,
-                    "total_tokens": response.usage_metadata.total_token_count
-                }
-                
+
+            usage = self._parse_usage_metadata(response)
             return LLMResponse(content=result, usage_metadata=usage)
         except Exception as e:
             self.logger.error(f"Fallback extraction error: {e}")
@@ -179,10 +171,10 @@ class GeminiProvider(LLMInterface):
     async def structure_resume_batch(self, markdown_texts: list[str]) -> LLMResponse:
         """Structure 2-3 locally-parsed markdown CVs into parsed_data JSON."""
         try:
-            labeled_resumes = []
-            for i, text in enumerate(markdown_texts):
-                labeled_resumes.append(f"=== RESUME {i+1} ===\n{text}\n=== END RESUME {i+1} ===")
-
+            labeled_resumes = [
+                f"=== RESUME {i+1} ===\n{text}\n=== END RESUME {i+1} ==="
+                for i, text in enumerate(markdown_texts)
+            ]
             combined = "\n\n".join(labeled_resumes)
             prompt = (
                 RESUME_STRUCTURE_PROMPT
@@ -194,31 +186,19 @@ class GeminiProvider(LLMInterface):
             response = await self.client.aio.models.generate_content(
                 model=self.model_id,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=8192,
-                    response_mime_type="application/json"
-                )
+                config=types.GenerateContentConfig(**BATCH_STRUCTURING_GENERATION_CONFIG)
             )
 
             result = json.loads(response.text)
             if not isinstance(result, list):
                 result = [result]
 
-            # Validate we got the right number of results
             if len(result) != len(markdown_texts):
                 self.logger.warning(
                     f"Expected {len(markdown_texts)} structured resumes, got {len(result)}"
                 )
 
-            usage = {}
-            if response.usage_metadata:
-                usage = {
-                    "prompt_tokens": response.usage_metadata.prompt_token_count,
-                    "completion_tokens": response.usage_metadata.candidates_token_count,
-                    "total_tokens": response.usage_metadata.total_token_count
-                }
-
+            usage = self._parse_usage_metadata(response)
             return LLMResponse(content=result, usage_metadata=usage)
         except Exception as e:
             self.logger.error(f"Batch structuring error: {e}")

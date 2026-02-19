@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     FILE_CHUNK_SIZE: int = Field(default=512000)
     FILE_DEFAULT_CHUNK_SIZE: int = Field(default=1048576)
     FILE_BYTES_TO_MB: int = Field(default=1048576)
+    UPLOAD_MAX_FILES: int = Field(default=200)
+    UPLOAD_MAX_TOTAL_SIZE_MB: int = Field(default=50)
 
     # ── Database Settings (MongoDB) ──────────────────────────────────────
     MONGO_DB: str = Field(default="mongodb://localhost:27017")
