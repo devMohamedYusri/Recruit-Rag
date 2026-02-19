@@ -1,7 +1,7 @@
 from typing import Optional, Dict, Any
 from google import genai
 from google.genai import types
-from ..LLMInterface import LLMInterface
+from ..LLMInterface import LLMInterface, LLMResponse
 from utils.prompts import RESUME_STRUCTURE_PROMPT
 import logging
 import numpy as np
@@ -34,13 +34,11 @@ class GeminiProvider(LLMInterface):
         }
         self.logger = logging.getLogger(__name__)
 
-    async def generate(self, prompt: str, config: Optional[Dict[str, Any]] = None) -> str:
+    async def generate(self, prompt: str, config: Optional[Dict[str, Any]] = None) -> LLMResponse:
         if not self.client:
-            self.logger.error("genai client was not set")
-            return None
+            raise RuntimeError("genai client was not set")
         if not self.model_id:
-            self.logger.error("generation model was not set")
-            return None
+            raise RuntimeError("generation model was not set")
 
         final_config_dict = self.default_config.copy()
         if config:
@@ -56,18 +54,25 @@ class GeminiProvider(LLMInterface):
                 contents=prompt,
                 config=generation_config
             )
-            return response.text
+            
+            usage = {}
+            if response.usage_metadata:
+                usage = {
+                    "prompt_tokens": response.usage_metadata.prompt_token_count,
+                    "completion_tokens": response.usage_metadata.candidates_token_count,
+                    "total_tokens": response.usage_metadata.total_token_count
+                }
+
+            return LLMResponse(content=response.text, usage_metadata=usage)
         except Exception as e:
             self.logger.error(f"Gemini generation error: {e}")
             raise RuntimeError(f"Failed to generate content: {str(e)}")
 
     async def embed_documents(self, texts):
         if not self.client:
-            self.logger.error("genai client was not set")
-            return None
+            raise RuntimeError("genai client was not set")
         if not self.embedding_model_id:
-            self.logger.error("embedding model was not set")
-            return None
+            raise RuntimeError("embedding model was not set")
         try:
             response = await self.client.aio.models.embed_content(
                 model=self.embedding_model_id,
@@ -90,7 +95,7 @@ class GeminiProvider(LLMInterface):
             return embeddings
         except Exception as e:
             self.logger.error(f"Embedding doc error: {e}")
-            return []
+            raise RuntimeError(f"Failed to embed documents: {str(e)}")
 
     async def embed_query(self, text):
         try:
@@ -138,7 +143,7 @@ class GeminiProvider(LLMInterface):
             self.logger.error(f"File upload error: {e}")
             raise RuntimeError(f"Failed to upload file: {str(e)}")
 
-    async def extract_structured_resume(self, file_ref) -> dict:
+    async def extract_structured_resume(self, file_ref) -> LLMResponse:
         """Fallback: extract and structure a resume directly from an uploaded file."""
         try:
             prompt = RESUME_STRUCTURE_PROMPT + "\n\nExtract the resume from the uploaded document."
@@ -157,12 +162,21 @@ class GeminiProvider(LLMInterface):
             # If result is a list (batch response), take the first
             if isinstance(result, list):
                 result = result[0]
-            return result
+            
+            usage = {}
+            if response.usage_metadata:
+                usage = {
+                    "prompt_tokens": response.usage_metadata.prompt_token_count,
+                    "completion_tokens": response.usage_metadata.candidates_token_count,
+                    "total_tokens": response.usage_metadata.total_token_count
+                }
+                
+            return LLMResponse(content=result, usage_metadata=usage)
         except Exception as e:
             self.logger.error(f"Fallback extraction error: {e}")
             raise RuntimeError(f"Failed to extract resume via Gemini: {str(e)}")
 
-    async def structure_resume_batch(self, markdown_texts: list[str]) -> list[dict]:
+    async def structure_resume_batch(self, markdown_texts: list[str]) -> LLMResponse:
         """Structure 2-3 locally-parsed markdown CVs into parsed_data JSON."""
         try:
             labeled_resumes = []
@@ -197,7 +211,15 @@ class GeminiProvider(LLMInterface):
                     f"Expected {len(markdown_texts)} structured resumes, got {len(result)}"
                 )
 
-            return result
+            usage = {}
+            if response.usage_metadata:
+                usage = {
+                    "prompt_tokens": response.usage_metadata.prompt_token_count,
+                    "completion_tokens": response.usage_metadata.candidates_token_count,
+                    "total_tokens": response.usage_metadata.total_token_count
+                }
+
+            return LLMResponse(content=result, usage_metadata=usage)
         except Exception as e:
             self.logger.error(f"Batch structuring error: {e}")
             raise RuntimeError(f"Failed to structure resume batch: {str(e)}")

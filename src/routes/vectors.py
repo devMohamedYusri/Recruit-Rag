@@ -87,3 +87,16 @@ async def search_vectors(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to search vectors: {str(e)}"
         )
+
+@vector_router.post("/search")
+async def search_vectors_body(
+    request: Request,
+    search_request: SearchVectorsRequest,
+):
+    project_id = search_request.project_id
+    if not project_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="project_id is required in the request body"
+        )
+    return await search_vectors(request, project_id, search_request)

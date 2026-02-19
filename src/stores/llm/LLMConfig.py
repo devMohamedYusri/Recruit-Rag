@@ -6,7 +6,7 @@ class LLMConfig:
     PROVIDER_GROQ = "groq"
 
     # ── Default Model Settings ───────────────────────────────────
-    DEFAULT_GEMINI_MODEL: str = "gemini-3-pro-preview"
+    DEFAULT_GEMINI_MODEL: str = "gemini-2.5-flash"
     DEFAULT_GROQ_MODEL: str = "llama-3.1-8b-instant"
     DEFAULT_EMBEDDING_MODEL: str = "gemini-embedding-001"
     DEFAULT_EMBEDDING_DIMENSION: int = 768

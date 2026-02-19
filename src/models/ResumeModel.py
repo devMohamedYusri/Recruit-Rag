@@ -60,3 +60,14 @@ class ResumeModel(BaseDataModel):
             "project_id": project_id
         })
         return result.deleted_count
+
+    async def get_resumes_by_ids(self, resume_ids: list[str]):
+        object_ids = [
+            ObjectId(rid) if ObjectId.is_valid(rid) else rid
+            for rid in resume_ids
+        ]
+        records = await self.collection.find({
+            "_id": {"$in": object_ids}
+        }).to_list(length=None)
+        return [Resume(**record) for record in records]
+

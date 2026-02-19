@@ -1,24 +1,31 @@
 from abc import ABC, abstractmethod
-from typing import Dict,Optional,Any
+from typing import Dict, Optional, Any, List
+from dataclasses import dataclass
+
+@dataclass
+class LLMResponse:
+    content: Any
+    usage_metadata: Optional[Dict[str, int]] = None
+
 
 class LLMInterface(ABC):
     @abstractmethod
-    async def generate(self,prompt:str,config:Optional[Dict[str,Any]]=None):
+    async def generate(self, prompt: str, config: Optional[Dict[str, Any]] = None) -> LLMResponse:
         """
         Generates text.
-        'config' can override model_id or temperature at runtime.
+        Returns LLMResponse(content=str, usage_metadata=dict).
         """
         pass
     
     @abstractmethod
-    async def embed_documents(self,texts:list[str]):
+    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """
         Embeds a list of texts for storage (Database).
         """
         pass
     
     @abstractmethod
-    async def embed_query(self,text:str):
+    async def embed_query(self, text: str) -> List[float]:
         """
         Embeds a single query for searching (Retrieval).
         """
@@ -33,17 +40,17 @@ class LLMInterface(ABC):
         pass
 
     @abstractmethod
-    async def extract_structured_resume(self, file_ref) -> dict:
+    async def extract_structured_resume(self, file_ref) -> LLMResponse:
         """
         Fallback: Extract and structure a resume from an uploaded file.
-        Returns {candidate_name, contact_info, full_content, parsed_data}.
+        Returns LLMResponse(content=dict, usage_metadata=dict).
         """
         pass
 
     @abstractmethod
-    async def structure_resume_batch(self, markdown_texts: list[str]) -> list[dict]:
+    async def structure_resume_batch(self, markdown_texts: List[str]) -> LLMResponse:
         """
         Structure 2-3 locally-parsed markdown CVs into parsed_data JSON.
-        Returns a list of {candidate_name, contact_info, parsed_data} dicts.
+        Returns LLMResponse(content=list[dict], usage_metadata=dict).
         """
         pass

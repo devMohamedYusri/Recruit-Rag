@@ -8,3 +8,4 @@ from .ChunkModel import ChunkModel
 from .AssetModel import AssetModel
 from .ResumeModel import ResumeModel
 from .JobDescriptionModel import JobDescriptionModel
+from .UsageLogModel import UsageLogModel

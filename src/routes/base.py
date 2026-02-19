@@ -1,4 +1,4 @@
-from fastapi import APIRouter,Depends
+from fastapi import APIRouter,Depends,Request
 from utils import get_settings,Settings
 base_router=APIRouter(
     prefix="/api/v1",
@@ -14,4 +14,15 @@ def welcome(app_settings:Settings=Depends(get_settings)):
         "message": "Hello, welcome home",
         "version": app_version,
         "name": app_name
+    }
+
+@base_router.get("/debug/assets/{project_id}")
+async def debug_assets(project_id: str, request: Request):
+    db = request.app.state.db_client
+    assets = await db.assets.find({"project_id": project_id}).to_list(length=None)
+    return {
+        "count": len(assets),
+        "assets": [
+            {"name": a.get("name"), "_id": str(a.get("_id"))} for a in assets
+        ]
     }

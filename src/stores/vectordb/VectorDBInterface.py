@@ -53,8 +53,9 @@ class VectorDBInterface(ABC):
         vectors: List[List[float]],
         metadata: List[Dict[str, Any]],
         texts: List[str],
+        sparse_vectors: List[Any] = None,
     ):
-        """Upsert pre-embedded vectors into a specific collection."""
+        """Upsert pre-embedded vectors (dense + optional sparse) into a specific collection."""
         pass
 
     @abstractmethod
@@ -62,9 +63,10 @@ class VectorDBInterface(ABC):
         self,
         collection_name: str,
         query_vector: List[float],
+        query_sparse_vector: Any = None,
         k: int = 5,
     ) -> List[SearchResult]:
-        """Search a specific collection by vector similarity."""
+        """Search a specific collection by vector similarity (Hybrid if sparse provided)."""
         pass
 
     @abstractmethod

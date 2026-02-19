@@ -30,6 +30,13 @@ class QdrantdbProvider(VectorDBInterface):
                     size=embedding_dim,
                     distance=self.distance_metric,
                 ),
+                sparse_vectors_config={
+                    "bm25": models.SparseVectorParams(
+                        index=models.SparseIndexParams(
+                            on_disk=False,
+                        )
+                    )
+                },
             )
             await self.client.create_payload_index(
                 collection_name=collection_name,
@@ -68,14 +75,34 @@ class QdrantdbProvider(VectorDBInterface):
         vectors: List[List[float]],
         metadata: List[Dict[str, Any]],
         texts: List[str],
+        sparse_vectors: List[Any] = None,
     ):
         points = []
-        for i, (vector, meta, text) in enumerate(zip(vectors, metadata, texts)):
+        if sparse_vectors is None:
+            # If no sparse vectors provided, just use None for all
+            sparse_iter = [None] * len(vectors)
+        else:
+            sparse_iter = sparse_vectors
+
+        for i, (vector, meta, text, sparse_vec) in enumerate(zip(vectors, metadata, texts, sparse_iter)):
             point_id = str(uuid.uuid4())
             payload = meta.copy() if meta else {}
             payload["text"] = text
+            
+            # Construct vector argument: either list (dense only) or dict (dense + sparse)
+            if sparse_vec:
+                vector_data = {
+                    "": vector, # Default unnamed dense vector
+                    "bm25": models.SparseVector(
+                        indices=sparse_vec.indices.tolist() if hasattr(sparse_vec, "indices") else sparse_vec["indices"],
+                        values=sparse_vec.values.tolist() if hasattr(sparse_vec, "values") else sparse_vec["values"]
+                    )
+                }
+            else:
+                vector_data = vector
+
             points.append(
-                models.PointStruct(id=point_id, vector=vector, payload=payload)
+                models.PointStruct(id=point_id, vector=vector_data, payload=payload)
             )
 
         await self.client.upsert(
@@ -88,14 +115,47 @@ class QdrantdbProvider(VectorDBInterface):
         self,
         collection_name: str,
         query_vector: List[float],
+        query_sparse_vector: Any = None,
         k: int = 10,
     ) -> List[SearchResult]:
-        response = await self.client.query_points(
-            collection_name=collection_name,
-            query=query_vector,
-            limit=k,
-            with_payload=True,
-        )
+        if query_sparse_vector:
+            # Hybrid search with RRF fusion
+            # Needs to convert SparseEmbedding to Qdrant SparseVector format if needed
+            if hasattr(query_sparse_vector, "indices"):
+                 indices = query_sparse_vector.indices.tolist()
+                 values = query_sparse_vector.values.tolist()
+            else:
+                 indices = query_sparse_vector["indices"]
+                 values = query_sparse_vector["values"]
+
+            prefetch = [
+                models.Prefetch(
+                    query=query_vector,
+                    using=None, # Default dense vector
+                    limit=k,
+                ),
+                models.Prefetch(
+                    query=models.SparseVector(indices=indices, values=values),
+                    using="bm25",
+                    limit=k,
+                ),
+            ]
+            
+            response = await self.client.query_points(
+                collection_name=collection_name,
+                prefetch=prefetch,
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=k,
+                with_payload=True,
+            )
+        else:
+            # Dense-only search (fallback)
+            response = await self.client.query_points(
+                collection_name=collection_name,
+                query=query_vector,
+                limit=k,
+                with_payload=True,
+            )
         return [
             SearchResult(
                 id=str(point.id),

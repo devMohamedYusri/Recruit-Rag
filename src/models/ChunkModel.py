@@ -5,25 +5,26 @@ from pymongo import IndexModel, InsertOne
 
 
 class ChunkModel(BaseDataModel):
-    collection_setting_key:str="CHUNKS_COLLECTION"
-    def __init__(self,db_client:object):
+    collection_setting_key: str = "CHUNKS_COLLECTION"
+
+    def __init__(self, db_client: object):
         super().__init__(db_client=db_client)
 
     @classmethod
-    async def create_instance(cls,db_client:object):
-        instance=cls(db_client=db_client)
+    async def create_instance(cls, db_client: object):
+        instance = cls(db_client=db_client)
         await instance.init_collection()
         return instance
 
 
     async def init_collection(self):
         indexes = Chunk.get_indexes()
-        models=[
+        models = [
             IndexModel(
                 index['fields'],
                 name=index['name'],
                 unique=index.get('unique', False)
-            )for index in indexes
+            ) for index in indexes
         ]
 
         if models:

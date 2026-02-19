@@ -1,9 +1,12 @@
 from fastapi import APIRouter, status, Request, HTTPException
-from fastapi.responses import JSONResponse
-from controllers import LLMController, VectorController
+from fastapi.responses import JSONResponse, StreamingResponse
+from controllers import LLMController, VectorController, UsageController
 from models import ProjectModel, ResumeModel, JobDescriptionModel, AssetModel, ChunkModel
+from models.UsageLogModel import UsageLogModel
 from models.DB_schemas.job_description import JobDescription
 from .schema import JobDescriptionRequest, ProcessResumesRequest, ScreenRequest
+from stores.llm.LLMProviderFactory import LLMProviderFactory
+from utils.config import get_settings
 import logging
 
 logger = logging.getLogger("uvicorn.error")
@@ -33,6 +36,8 @@ async def create_job_description(
             title=jd_request.title,
             description=jd_request.description,
             prompt=jd_request.prompt,
+            weights=jd_request.weights,
+            custom_rubric=jd_request.custom_rubric,
         )
         result = await jd_model.create_or_update_job_description(jd)
 
@@ -58,9 +63,19 @@ async def process_resumes(
     project_id: str,
     process_request: ProcessResumesRequest,
 ):
+
     """Extract, structure, chunk, and vectorize resumes for a project."""
     try:
+        settings = get_settings()
         generation_client = request.app.state.generation_client
+        
+        # Instantiate factory to get extraction client
+        llm_factory = LLMProviderFactory(settings)
+        extraction_client = llm_factory.create(
+            provider=settings.GENERATION_BACKEND,
+            model_id=settings.CV_EXTRACTION_MODEL_ID
+        )
+
         project_model = await ProjectModel.create_instance(
             db_client=request.app.state.db_client
         )
@@ -73,6 +88,10 @@ async def process_resumes(
         asset_model = await AssetModel.create_instance(
             db_client=request.app.state.db_client
         )
+        usage_model = await UsageLogModel.create_instance(
+            db_client=request.app.state.db_client
+        )
+        usage_controller = UsageController(usage_model)
 
         project = await project_model.get_project_or_create_one(project_id)
 
@@ -94,7 +113,9 @@ async def process_resumes(
             asset_model=asset_model,
             vector_controller=vector_controller,
             project=project,
-            do_reset=process_request.do_reset
+            do_reset=process_request.do_reset,
+            extraction_client=extraction_client, # Pass extraction client
+            usage_controller=usage_controller
         )
 
         return JSONResponse(
@@ -118,25 +139,70 @@ async def screen_candidates(
     request: Request,
     project_id: str,
     screen_request: ScreenRequest,
+    smart_screen: bool = True,
+    stream: bool = False,
 ):
-    """Screen all (or selected) CVs against the cached job description."""
+    """Screen all (or selected) CVs against the project's job description."""
     try:
         generation_client = request.app.state.generation_client
-        resume_model = await ResumeModel.create_instance(
-            db_client=request.app.state.db_client
-        )
-        jd_model = await JobDescriptionModel.create_instance(
-            db_client=request.app.state.db_client
-        )
+        resume_model = await ResumeModel.create_instance(request.app.state.db_client)
+        jd_model = await JobDescriptionModel.create_instance(request.app.state.db_client)
+        project_model = await ProjectModel.create_instance(request.app.state.db_client)
+        usage_model = await UsageLogModel.create_instance(request.app.state.db_client)
+        usage_controller = UsageController(usage_model)
+        
+        # Instantiate dependencies
+        embedding_client = request.app.state.embedding_client
+        vector_db = request.app.state.vector_db
+        vector_controller = VectorController(vector_db, embedding_client)
 
-        results = await llm_controller.screen_candidates(
-            generation_client=generation_client,
-            resume_model=resume_model,
-            jd_model=jd_model,
-            project_id=project_id,
-            file_ids=screen_request.file_ids,
-            anonymize=screen_request.anonymize
-        )
+        if stream:
+            if smart_screen:
+                generator = llm_controller.smart_screen_candidates_stream(
+                    generation_client=generation_client,
+                    resume_model=resume_model,
+                    vector_controller=vector_controller,
+                    jd_model=jd_model,
+                    project_model=project_model,
+                    project_id=project_id,
+                    file_ids=screen_request.file_ids,
+                    anonymize=screen_request.anonymize,
+                    usage_controller=usage_controller
+                )
+            else:
+                generator = llm_controller.screen_candidates_stream(
+                    generation_client=generation_client,
+                    resume_model=resume_model,
+                    jd_model=jd_model,
+                    project_id=project_id,
+                    file_ids=screen_request.file_ids,
+                    anonymize=screen_request.anonymize,
+                    usage_controller=usage_controller
+                )
+            return StreamingResponse(generator, media_type="application/x-ndjson")
+
+        if smart_screen:
+            results = await llm_controller.smart_screen_candidates(
+                generation_client=generation_client,
+                resume_model=resume_model,
+                vector_controller=vector_controller,
+                jd_model=jd_model,
+                project_model=project_model,
+                project_id=project_id,
+                file_ids=screen_request.file_ids,
+                anonymize=screen_request.anonymize,
+                usage_controller=usage_controller
+            )
+        else:
+            results = await llm_controller.screen_candidates(
+                generation_client=generation_client,
+                resume_model=resume_model,
+                jd_model=jd_model,
+                project_id=project_id,
+                file_ids=screen_request.file_ids,
+                anonymize=screen_request.anonymize,
+                usage_controller=usage_controller
+            )
 
         return JSONResponse(
             content={

@@ -62,7 +62,7 @@ class ResumeProcessor(BaseController):
         return True
 
     async def extract_resume_content(
-        self, generation_client, file_path: str, file_id: str, file_extension: str
+        self, generation_client, file_path: str, file_id: str, file_extension: str, usage_controller=None, project_id: str=None
     ) -> tuple[str, str]:
         try:
             content = self.load_document(file_path, file_extension)
@@ -76,16 +76,27 @@ class ResumeProcessor(BaseController):
 
         mime_type = MIME_MAP.get(file_extension, "application/octet-stream")
         file_ref = await generation_client.upload_file(file_path, mime_type)
-        result = await generation_client.extract_structured_resume(file_ref)
-        return json.dumps(result, ensure_ascii=False), "gemini_fallback"
+        response = await generation_client.extract_structured_resume(file_ref)
+        
+        if usage_controller and project_id and response.usage_metadata:
+            await usage_controller.log_usage(
+                project_id=project_id,
+                model_id=generation_client.model_id,
+                action_type="cv_extraction_fallback",
+                usage_metadata=response.usage_metadata
+            )
+
+        return json.dumps(response.content, ensure_ascii=False), "gemini_fallback"
 
     async def structure_and_store_batch(
         self,
         generation_client,
         items: list[dict],
         project_id: str,
-        resume_model
+        resume_model,
+        usage_controller=None
     ) -> list[Resume]:
+
         stored_resumes = []
 
         local_items = [it for it in items if it["method"] == "local"]
@@ -111,7 +122,17 @@ class ResumeProcessor(BaseController):
         if local_items:
             markdown_texts = [it["content"] for it in local_items]
             try:
-                structured_results = await generation_client.structure_resume_batch(markdown_texts)
+                response = await generation_client.structure_resume_batch(markdown_texts)
+                structured_results = response.content
+                
+                if usage_controller and response.usage_metadata:
+                    await usage_controller.log_usage(
+                        project_id=project_id,
+                        model_id=generation_client.model_id,
+                        action_type="cv_structuring_batch",
+                        usage_metadata=response.usage_metadata
+                    )
+
                 for i, item in enumerate(local_items):
                     parsed = structured_results[i] if i < len(structured_results) else {
                         "candidate_name": "Unknown", "contact_info": {}, "parsed_data": {}
@@ -238,7 +259,9 @@ class ResumeProcessor(BaseController):
         asset_model,
         vector_controller,
         project,
-        do_reset: bool = False
+        do_reset: bool = False,
+        extraction_client = None,
+        usage_controller = None
     ):
         if do_reset:
             await resume_model.delete_resumes_by_project_id(project_id)
@@ -251,6 +274,7 @@ class ResumeProcessor(BaseController):
         if not assets:
             return {"processed": 0, "errors": []}
 
+        processing_client = extraction_client if extraction_client else generation_client
         sem = asyncio.Semaphore(self.app_settings.LLM_CONCURRENCY_LIMIT)
         extracted_items = []
         errors = []
@@ -260,7 +284,7 @@ class ResumeProcessor(BaseController):
                 try:
                     ext = asset.name.split(".")[-1].lower()
                     content, method = await self.extract_resume_content(
-                        generation_client, asset.url, asset.name, ext
+                        processing_client, asset.url, asset.name, ext, usage_controller, project_id
                     )
                     return {"file_id": asset.name, "content": content, "method": method}
                 except Exception as e:
@@ -277,8 +301,8 @@ class ResumeProcessor(BaseController):
             batch = extracted_items[i:i + batch_size]
             try:
                 resumes = await self.structure_and_store_batch(
-                    generation_client, batch, project_id, resume_model
-                )
+                    processing_client, batch, project_id, resume_model, usage_controller
+                ) 
                 all_resumes.extend(resumes)
             except Exception as e:
                 logger.error(f"Batch processing error: {e}")

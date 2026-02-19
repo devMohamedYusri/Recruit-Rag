@@ -9,8 +9,8 @@ class AssetModel(BaseDataModel):
         super().__init__(db_client)
         
     @classmethod
-    async def create_instance(cls,db_client:object):
-        instance=cls(db_client=db_client)
+    async def create_instance(cls, db_client: object):
+        instance = cls(db_client=db_client)
         await instance.init_collection()
         return instance
     
@@ -27,8 +27,8 @@ class AssetModel(BaseDataModel):
         if models:
             await self.collection.create_indexes(models)
                 
-    async def create_asset(self,asset_data:Asset):
-        data=asset_data.model_dump(by_alias=True,exclude_none=True)
+    async def create_asset(self, asset_data: Asset):
+        data = asset_data.model_dump(by_alias=True, exclude_none=True)
         result = await self.collection.insert_one(data)
         data["_id"] = result.inserted_id
         

@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, BeforeValidator, ConfigDict
-from typing import Annotated, Optional
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional
 from datetime import datetime
 from .types import PyObjectId
 
@@ -9,6 +9,8 @@ class JobDescription(BaseModel):
     title: str = Field(..., min_length=1)
     description: str = Field(..., min_length=1)
     prompt: Optional[str] = Field(default=None)
+    weights: Optional[dict[str, float]] = Field(default_factory=dict)
+    custom_rubric: Optional[str] = Field(default=None)
     created_at: Optional[str] = Field(
         default_factory=lambda: datetime.now().isoformat()
     )

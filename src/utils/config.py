@@ -33,12 +33,14 @@ class Settings(BaseSettings):
     ASSETS_COLLECTION: str = Field(default="ASSETS_COLLECTION")
     RESUMES_COLLECTION: str = Field(default="RESUMES_COLLECTION")
     JOB_DESCRIPTIONS_COLLECTION: str = Field(default="JOB_DESCRIPTIONS_COLLECTION")
+    USAGE_LOGS_COLLECTION: str = Field(default="USAGE_LOGS_COLLECTION")
 
     # ── LLM Configuration ────────────────────────────────────────────────
     GENERATION_BACKEND: str = Field(default="gemini")
-    EMBEDDING_BACKEND: str = Field(default="groq")
+    EMBEDDING_BACKEND: str = Field(default="gemini")
 
-    GENERATION_MODEL_ID: str = Field(default="llama-3.3-70b-versatile")
+    GENERATION_MODEL_ID: str = Field(default="gemini-2.5-flash")
+    CV_EXTRACTION_MODEL_ID: str = Field(default="gemini-2.5-flash-lite")
     EMBEDDING_MODEL_ID: str = Field(default="gemini-embedding-001")
     EMBEDDING_MODEL_SIZE: int = Field(default=768)
 
@@ -54,7 +56,6 @@ class Settings(BaseSettings):
     DB_DIRECTORY: str = Field(default="assets/database")
     VECTOR_DB_NAME: str = Field(default="vector_db")
     VECTOR_DB_DISTANCE: str = Field(default="cosine")
-    VECTOR_DB_COLLECTION_NAME: str = Field(default="chunks")
 
 
 

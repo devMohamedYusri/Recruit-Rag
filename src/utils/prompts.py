@@ -37,19 +37,31 @@ You MUST return ONLY valid JSON with no extra text. Use this exact structure:
   "key_match_analysis": {
     "strengths": ["<matching qualification 1>", "<matching qualification 2>"],
     "missing_critical_skills": ["<missing skill 1>", "<missing skill 2>"],
-    "experience_relevance": "<1-2 sentence assessment of experience relevance>"
+    "experience_analysis": {
+        "total_relevant_experience_years": <number, e.g., 4.5>,
+        "required_years": <number, based on JD>,
+        "seniority_level": "<Junior|Mid|Senior|Lead>",
+        "seniority_alignment": "<Below Requirements|Meets Requirements|Exceeds Requirements>",
+        "role_fit_justification": "<concise, evidence-based justification>"
+    }
   },
   "flags": {
     "red_flags": ["<serious concern 1>"],
     "yellow_flags": ["<minor concern 1>"]
   },
   "interview_prep": {
+    "interview_recommendation": "<'Recommended' or 'Not recommended based on resume evidence'>",
     "suggested_questions": ["<question 1>", "<question 2>"]
   }
 }
 
 RULES:
-- Score 0-30: Low Match, 31-60: Medium Match, 61-85: High Match, 86-100: Excellent Match
-- Base your analysis ONLY on what is explicitly stated in the resume and job description
-- Do NOT invent qualifications or experience not present in the resume
-- Return ONLY the JSON, no markdown fences, no explanations"""
+- Score Logic: Avoid 0 unless resume is empty. For very low matches, use 5-15.
+- Score Ranges: 0-30: Low Match, 31-60: Medium Match, 61-85: High Match, 86-100: Excellent Match.
+- **TONE**: Use neutral, evidence-based language. Avoid absolute negatives like "Complete lack of". Instead use "No evidence of" or "Not mentioned in resume".
+- **Interview Questions**: If fit_score < 20, return an EMPTY array [] for suggested_questions and set interview_recommendation to "Not recommended".
+- Base your analysis ONLY on verifiable evidence in the resume.
+- Do NOT invent qualifications or experience not present in the resume.
+- **CUSTOM INSTRUCTIONS**: If "CUSTOM EVALUATION RUBRIC" or "SCORING WEIGHTS" are provided, you MUST prioritize them over general HR guidelines.
+- Return ONLY the JSON, no markdown fences, no explanations.
+"""

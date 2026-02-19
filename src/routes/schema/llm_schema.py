@@ -6,6 +6,8 @@ class JobDescriptionRequest(BaseModel):
     title: str
     description: str
     prompt: Optional[str] = None
+    weights: Optional[dict[str, float]] = None
+    custom_rubric: Optional[str] = None
 
 
 class ProcessResumesRequest(BaseModel):
@@ -16,3 +18,4 @@ class ProcessResumesRequest(BaseModel):
 class ScreenRequest(BaseModel):
     file_ids: Optional[list[str]] = None
     anonymize: bool = True
+

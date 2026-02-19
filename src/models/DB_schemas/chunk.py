@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field,BeforeValidator
-from typing import Annotated, Optional
+from pydantic import BaseModel, Field
+from typing import Optional
 from .types import PyObjectId
 
 class Chunk(BaseModel):

@@ -8,8 +8,8 @@ class ProjectModel(BaseDataModel):
         super().__init__(db_client=db_client)
 
     @classmethod
-    async def create_instance(cls,db_client:object):
-        instance=cls(db_client=db_client)
+    async def create_instance(cls, db_client: object):
+        instance = cls(db_client=db_client)
         await instance.init_collection()
         return instance
 
@@ -31,8 +31,8 @@ class ProjectModel(BaseDataModel):
         result=await self.collection.insert_one(data)
         return str(result.inserted_id)
     
-    async def get_project_or_create_one(self,project_id:str):
-        record=await self.collection.find_one({"project_id":project_id})
+    async def get_project_or_create_one(self, project_id: str):
+        record = await self.collection.find_one({"project_id": project_id})
         if not record:
             default_project = Project(project_id=project_id)
             await self.create_project(default_project)
@@ -51,12 +51,12 @@ class ProjectModel(BaseDataModel):
             "project_id":project_id
         })
         return result.deleted_count > 0
-    async def get_all_projects(self,page:int=1,page_size:int=10):
-        total_docs=await self.count_documents()
-        total_pages=(total_docs + page_size - 1) // page_size
-        skip=(page-1)*page_size
-        cursor=self.collection.find().skip(skip).limit(page_size)
-        projects=[]
+    async def get_all_projects(self, page: int = 1, page_size: int = 10):
+        total_docs = await self.count_documents()
+        total_pages = (total_docs + page_size - 1) // page_size
+        skip = (page - 1) * page_size
+        cursor = self.collection.find().skip(skip).limit(page_size)
+        projects = []
         async for document in cursor:
             projects.append(Project(**document))
         return projects, total_pages

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Annotated, Optional
+from typing import Optional
 from .types import PyObjectId
 
 class Project(BaseModel):
