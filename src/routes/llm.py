@@ -1,12 +1,13 @@
-from fastapi import APIRouter, status, Request, HTTPException
+from fastapi import APIRouter, status, Request, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from controllers import LLMController, VectorController, UsageController
-from models import ProjectModel, ResumeModel, JobDescriptionModel, AssetModel, ChunkModel
-from models.UsageLogModel import UsageLogModel
+from models import ProjectModel, ResumeModel, JobDescriptionModel, AssetModel, ChunkModel, UsageLogModel
 from models.DB_schemas.job_description import JobDescription
 from .schema import JobDescriptionRequest, ProcessResumesRequest, ScreenRequest
-from stores.llm.LLMProviderFactory import LLMProviderFactory
+from stores import LLMProviderFactory
 from utils.config import get_settings
+import asyncio
+import json
 import logging
 
 logger = logging.getLogger("uvicorn.error")
@@ -83,11 +84,39 @@ async def create_job_description(
         )
 
 
+@llm_router.get("/job-description/{project_id}")
+async def get_job_description(request: Request, project_id: str):
+    """Retrieve the current job description for a project."""
+    try:
+        jd_model = await JobDescriptionModel.create_instance(
+            db_client=request.app.state.db_client
+        )
+        jd = await jd_model.get_by_project_id(project_id)
+        if not jd:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No job description found for project '{project_id}'"
+            )
+
+        data = jd.model_dump(by_alias=True)
+        data["_id"] = str(data["_id"])
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get job description error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve job description: {str(e)}"
+        )
+
+
 @llm_router.post("/process-resumes/{project_id}")
 async def process_resumes(
     request: Request,
     project_id: str,
     process_request: ProcessResumesRequest,
+    stream: bool = Query(default=False),
 ):
     """Extract, structure, chunk, and vectorize resumes for a project."""
     try:
@@ -103,24 +132,66 @@ async def process_resumes(
         vector_controller = _get_vector_controller(request)
         project = await deps["project_model"].get_project_or_create_one(project_id)
 
-        result = await llm_controller.process_and_store(
-            generation_client=generation_client,
-            project_id=project_id,
-            file_ids=process_request.file_ids or [],
-            resume_model=deps["resume_model"],
-            chunk_model=deps["chunk_model"],
-            asset_model=deps["asset_model"],
-            vector_controller=vector_controller,
-            project=project,
-            do_reset=process_request.do_reset,
-            extraction_client=extraction_client,
-            usage_controller=deps["usage_controller"]
-        )
+        if not stream:
+            result = await llm_controller.process_and_store(
+                generation_client=generation_client,
+                project_id=project_id,
+                file_ids=process_request.file_ids or [],
+                resume_model=deps["resume_model"],
+                chunk_model=deps["chunk_model"],
+                asset_model=deps["asset_model"],
+                vector_controller=vector_controller,
+                project=project,
+                do_reset=process_request.do_reset,
+                extraction_client=extraction_client,
+                usage_controller=deps["usage_controller"]
+            )
+            return JSONResponse(
+                content={"signal": "resumes_processed", "project_id": project_id, **result},
+                status_code=status.HTTP_200_OK
+            )
 
-        return JSONResponse(
-            content={"signal": "resumes_processed", "project_id": project_id, **result},
-            status_code=status.HTTP_200_OK
-        )
+        # Streaming mode: return NDJSON progress
+        progress_queue = asyncio.Queue()
+
+        async def progress_callback(data: dict):
+            await progress_queue.put(data)
+
+        async def run_pipeline():
+            try:
+                await llm_controller.process_and_store(
+                    generation_client=generation_client,
+                    project_id=project_id,
+                    file_ids=process_request.file_ids or [],
+                    resume_model=deps["resume_model"],
+                    chunk_model=deps["chunk_model"],
+                    asset_model=deps["asset_model"],
+                    vector_controller=vector_controller,
+                    project=project,
+                    do_reset=process_request.do_reset,
+                    extraction_client=extraction_client,
+                    usage_controller=deps["usage_controller"],
+                    progress_callback=progress_callback
+                )
+            except Exception as e:
+                await progress_queue.put({"phase": "error", "error": str(e)})
+            finally:
+                await progress_queue.put(None)
+
+        async def event_generator():
+            task = asyncio.create_task(run_pipeline())
+            try:
+                while True:
+                    data = await progress_queue.get()
+                    if data is None:
+                        break
+                    yield json.dumps(data) + "\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+
+        return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
     except Exception as e:
         logger.error(f"Process resumes error: {e}")
         raise HTTPException(
@@ -139,6 +210,25 @@ async def screen_candidates(
 ):
     """Screen all (or selected) CVs against the project's job description."""
     try:
+        # First, verify project exists - this gives a clearer error message
+        deps = await _get_models(request.app.state.db_client)
+        project = await deps["project_model"].get_project_by_id(project_id)
+        
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Project '{project_id}' not found. Please create the project first."
+            )
+        
+        # Check if JD exists
+        jd_model = deps["jd_model"]
+        jd = await jd_model.get_by_project_id(project_id)
+        if not jd:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No job description found for project '{project_id}'. Please add a job description first."
+            )
+        
         generation_client = request.app.state.generation_client
         deps = await _get_models(request.app.state.db_client)
         vector_controller = _get_vector_controller(request)

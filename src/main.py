@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from routes import base_router, data_router, vector_router, llm_router, analytics_router
 from pymongo import AsyncMongoClient
 from utils import get_settings
@@ -28,7 +29,17 @@ async def lifespan(app:FastAPI):
         app.state.embedding_client = None
         app.state.vector_db_factory = None
         app.state.vector_db = None
+
+settings = get_settings()
 app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(base_router)
 app.include_router(data_router)

@@ -29,8 +29,10 @@ class UsageLogModel(BaseDataModel):
         if models:
             try:
                 await self.collection.create_indexes(models)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to create indexes for UsageLogModel collection: {e}")
 
     async def log_usage(self, usage_data: UsageLog):
         data = usage_data.model_dump(by_alias=True, exclude_none=True)
@@ -155,6 +157,10 @@ class UsageLogModel(BaseDataModel):
             }
             for r in results
         ]
+
+    async def delete_by_project_id(self, project_id: str):
+        result = await self.collection.delete_many({"project_id": project_id})
+        return result.deleted_count
 
     async def get_usage_logs(self, project_id: str, page: int = 1, page_size: int = 50) -> dict:
         """Raw log listing with pagination."""

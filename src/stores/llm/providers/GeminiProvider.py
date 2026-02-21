@@ -19,9 +19,9 @@ class GeminiProvider(LLMInterface):
         embedding_dimension: int = 768
      ):
         self.api_key = api_key
-        self.model_id = model_id
+        self._model_id = model_id
         self.embedding_model_id = embedding_model_id
-        self.embedding_dimension = embedding_dimension
+        self._embedding_dimension = embedding_dimension
 
         if not self.api_key:
             raise ValueError("Google API key is required")
@@ -34,6 +34,14 @@ class GeminiProvider(LLMInterface):
             "top_p": 0.9
         }
         self.logger = logging.getLogger(__name__)
+
+    @property
+    def embedding_dimension(self) -> int:
+        return self._embedding_dimension
+
+    @property
+    def model_id(self) -> str:
+        return self._model_id
 
     @staticmethod
     def _parse_usage_metadata(response) -> dict:
@@ -62,7 +70,7 @@ class GeminiProvider(LLMInterface):
 
         try:
             response = await self.client.aio.models.generate_content(
-                model=self.model_id,
+                model=self._model_id,
                 contents=prompt,
                 config=generation_config
             )

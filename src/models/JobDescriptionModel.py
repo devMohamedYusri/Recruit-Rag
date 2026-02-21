@@ -50,3 +50,7 @@ class JobDescriptionModel(BaseDataModel):
         if record:
             return JobDescription(**record)
         return None
+
+    async def delete_by_project_id(self, project_id: str):
+        result = await self.collection.delete_many({"project_id": project_id})
+        return result.deleted_count

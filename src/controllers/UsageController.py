@@ -1,5 +1,5 @@
 from .BaseController import BaseController
-from models.UsageLogModel import UsageLogModel
+from models import UsageLogModel
 from models.DB_schemas.usage_log import UsageLog
 import logging
 

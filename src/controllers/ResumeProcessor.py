@@ -1,15 +1,12 @@
-import re
 import json
 import asyncio
 import logging
 import time
 from .BaseController import BaseController
-from .ProjectController import ProjectController
 from models.DB_schemas.chunk import Chunk
 from models.DB_schemas.resume import Resume
-from utils.constants import SECTION_KEYWORDS, MIME_MAP
-from langchain_pymupdf4llm import PyMuPDF4LLMLoader
-from langchain_community.document_loaders import UnstructuredWordDocumentLoader, TextLoader
+from utils.constants import MIME_MAP
+from utils.file_loader import load_document, validate_extraction
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
@@ -18,40 +15,10 @@ logger = logging.getLogger(__name__)
 class ResumeProcessor(BaseController):
     def __init__(self):
         super().__init__()
-        self.project_controller = ProjectController()
 
     # ── Document Loading ─────────────────────────────────────────────────
 
-    def load_document(self, file_path: str, file_extension: str) -> str:
-        if file_extension in ["pdf", "epub", "mobi"]:
-            loader = PyMuPDF4LLMLoader(file_path)
-        elif file_extension == "txt":
-            loader = TextLoader(file_path, encoding="utf-8")
-        elif file_extension in ["docx"]:
-            loader = UnstructuredWordDocumentLoader(file_path, mode="single")
-        else:
-            raise ValueError(f"Unsupported file extension: {file_extension}")
-
-        docs = loader.load()
-        if not docs:
-            return ""
-        return "\n\n".join(doc.page_content for doc in docs)
-
-    def validate_extraction(self, content: str) -> bool:
-        if not content or len(content.strip()) < 100:
-            return False
-
-        content_lower = content.lower()
-        matched = sum(1 for kw in SECTION_KEYWORDS if kw in content_lower)
-        if matched < 2:
-            return False
-
-        garbled_count = len(re.findall(r'[^\x00-\x7F\u00C0-\u024F\u0600-\u06FF]', content))
-        garbled_ratio = garbled_count / len(content) if content else 0
-        if garbled_ratio > 0.3:
-            return False
-
-        return True
+    # Methods load_document and validate_extraction are now imported from utils.file_loader
 
     # ── Content Extraction ───────────────────────────────────────────────
 
@@ -59,8 +26,8 @@ class ResumeProcessor(BaseController):
         self, generation_client, file_path: str, file_id: str, file_extension: str, usage_controller=None, project_id: str = None
     ) -> tuple[str, str]:
         try:
-            content = self.load_document(file_path, file_extension)
-            if self.validate_extraction(content):
+            content = load_document(file_path, file_extension)
+            if validate_extraction(content):
                 logger.info(f"Local parsing succeeded for {file_id}")
                 return content, "local"
             else:
@@ -266,60 +233,109 @@ class ResumeProcessor(BaseController):
         project,
         do_reset: bool = False,
         extraction_client=None,
-        usage_controller=None
+        usage_controller=None,
+        progress_callback=None
     ):
         if do_reset:
             await resume_model.delete_resumes_by_project_id(project_id)
             await chunk_model.delete_chunks_by_project_id(project_id)
 
         assets = await asset_model.get_assets_by_project_id(project_id)
+        
+        # Skip already processed resumes if not resetting
+        if not do_reset:
+            existing_resumes = await resume_model.get_resumes_by_project_id(project_id)
+            processed_file_ids = {r.file_id for r in existing_resumes}
+            assets = [a for a in assets if a.name not in processed_file_ids]
+
         if file_ids:
             assets = [a for a in assets if a.name in file_ids]
+        
         if not assets:
+            if progress_callback:
+                await progress_callback({"phase": "complete", "processed": 0, "chunks_created": 0, "errors": []})
             return {"processed": 0, "errors": []}
 
         processing_client = extraction_client if extraction_client else generation_client
         errors = []
+        total = len(assets)
+
+        if progress_callback:
+            await progress_callback({"phase": "extracting", "total": total, "completed": 0})
 
         # Phase 1: Extract
-        extracted_items = await self._extract_all(processing_client, assets, usage_controller, project_id, errors)
+        extracted_items = await self._extract_all(
+            processing_client, assets, usage_controller, project_id, errors, progress_callback
+        )
+
+        if progress_callback:
+            await progress_callback({"phase": "structuring", "total": len(extracted_items), "completed": 0})
 
         # Phase 2: Structure & Store
-        all_resumes = await self._structure_all(processing_client, extracted_items, project_id, resume_model, usage_controller, errors)
+        all_resumes = await self._structure_all(
+            processing_client, extracted_items, project_id, resume_model, usage_controller, errors, progress_callback
+        )
+
+        if progress_callback:
+            await progress_callback({"phase": "chunking", "total": len(all_resumes), "completed": 0})
 
         # Phase 3: Chunk & Vectorize
-        all_chunks = await self._chunk_and_vectorize(all_resumes, project_id, chunk_model, vector_controller, project, do_reset, errors)
+        all_chunks = await self._chunk_and_vectorize(
+            all_resumes, project_id, chunk_model, vector_controller, project, do_reset, errors, progress_callback
+        )
 
-        return {
+        result = {
             "processed": len(all_resumes),
             "chunks_created": len(all_chunks),
             "errors": errors
         }
 
-    async def _extract_all(self, processing_client, assets, usage_controller, project_id, errors) -> list[dict]:
+        if progress_callback:
+            await progress_callback({"phase": "complete", **result})
+
+        return result
+
+    async def _extract_all(self, processing_client, assets, usage_controller, project_id, errors, progress_callback=None) -> list[dict]:
         """Extract content from all assets concurrently."""
         sem = asyncio.Semaphore(self.app_settings.LLM_CONCURRENCY_LIMIT)
+        completed_count = 0
+        total = len(assets)
 
         async def extract_one(asset):
+            nonlocal completed_count
             async with sem:
                 try:
                     ext = asset.name.split(".")[-1].lower()
                     content, method = await self.extract_resume_content(
                         processing_client, asset.url, asset.name, ext, usage_controller, project_id
                     )
+                    completed_count += 1
+                    if progress_callback:
+                        await progress_callback({
+                            "phase": "extracting", "total": total, "completed": completed_count,
+                            "file_id": asset.name, "status": "done"
+                        })
                     return {"file_id": asset.name, "content": content, "method": method}
                 except Exception as e:
+                    completed_count += 1
                     logger.error(f"Extraction failed for {asset.name}: {e}")
                     errors.append({"file_id": asset.name, "error": str(e)})
+                    if progress_callback:
+                        await progress_callback({
+                            "phase": "extracting", "total": total, "completed": completed_count,
+                            "file_id": asset.name, "status": "error", "error": str(e)
+                        })
                     return None
 
         results = await asyncio.gather(*[extract_one(a) for a in assets])
         return [r for r in results if r is not None]
 
-    async def _structure_all(self, processing_client, extracted_items, project_id, resume_model, usage_controller, errors) -> list[Resume]:
+    async def _structure_all(self, processing_client, extracted_items, project_id, resume_model, usage_controller, errors, progress_callback=None) -> list[Resume]:
         """Structure and store extracted items in batches."""
         all_resumes = []
         batch_size = 3
+        completed_count = 0
+        total = len(extracted_items)
 
         for i in range(0, len(extracted_items), batch_size):
             batch = extracted_items[i:i + batch_size]
@@ -328,16 +344,30 @@ class ResumeProcessor(BaseController):
                     processing_client, batch, project_id, resume_model, usage_controller
                 )
                 all_resumes.extend(resumes)
+                completed_count += len(batch)
+                if progress_callback:
+                    await progress_callback({
+                        "phase": "structuring", "total": total, "completed": completed_count,
+                        "file_ids": [item["file_id"] for item in batch], "status": "done"
+                    })
             except Exception as e:
+                completed_count += len(batch)
                 logger.error(f"Batch processing error: {e}")
                 for item in batch:
                     errors.append({"file_id": item["file_id"], "error": str(e)})
+                if progress_callback:
+                    await progress_callback({
+                        "phase": "structuring", "total": total, "completed": completed_count,
+                        "file_ids": [item["file_id"] for item in batch], "status": "error", "error": str(e)
+                    })
 
         return all_resumes
 
-    async def _chunk_and_vectorize(self, all_resumes, project_id, chunk_model, vector_controller, project, do_reset, errors) -> list[Chunk]:
+    async def _chunk_and_vectorize(self, all_resumes, project_id, chunk_model, vector_controller, project, do_reset, errors, progress_callback=None) -> list[Chunk]:
         """Chunk all resumes and upsert to vector DB."""
         all_chunks = []
+        completed_count = 0
+        total = len(all_resumes)
 
         for resume in all_resumes:
             if resume.parsed_data:
@@ -348,6 +378,16 @@ class ResumeProcessor(BaseController):
             if chunks:
                 await chunk_model.create_chunks_bulk(chunks)
                 all_chunks.extend(chunks)
+
+            completed_count += 1
+            if progress_callback:
+                await progress_callback({
+                    "phase": "chunking", "total": total, "completed": completed_count,
+                    "file_id": resume.file_id, "chunks": len(chunks) if chunks else 0, "status": "done"
+                })
+
+        if progress_callback:
+            await progress_callback({"phase": "vectorizing", "total": len(all_chunks)})
 
         if all_chunks:
             try:

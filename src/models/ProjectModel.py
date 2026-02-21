@@ -3,8 +3,8 @@ from .DB_schemas.project import Project
 from pymongo import IndexModel
 
 class ProjectModel(BaseDataModel):
-    collection_setting_key:str="PROJECTS_COLLECTION"
-    def __init__(self,db_client:object):
+    collection_setting_key: str = "PROJECTS_COLLECTION"
+    def __init__(self, db_client: object):
         super().__init__(db_client=db_client)
 
     @classmethod
@@ -15,21 +15,24 @@ class ProjectModel(BaseDataModel):
 
     async def init_collection(self):
         indexes = Project.get_indexes()
-        models=[
+        models = [
             IndexModel(
                 index['fields'],
                 name=index['name'],
                 unique=index.get('unique', False)
-            )for index in indexes
+            ) for index in indexes
         ]
 
         if models:
             await self.collection.create_indexes(models)
 
-    async def create_project(self,project_data:Project):
+    async def create_project(self, project_data: Project):
         data = project_data.model_dump(by_alias=True, exclude_none=True)
-        result=await self.collection.insert_one(data)
-        return str(result.inserted_id)
+        if "_id" not in data or data["_id"] is None:
+            data["_id"] = project_data.project_id
+        result = await self.collection.insert_one(data)
+        data["_id"] = result.inserted_id
+        return Project(**data)
     
     async def get_project_or_create_one(self, project_id: str):
         record = await self.collection.find_one({"project_id": project_id})
@@ -39,16 +42,16 @@ class ProjectModel(BaseDataModel):
             return default_project
         return Project(**record)
     
-    async def get_project_by_id(self,project_id:str):
-        record=await self.collection.find_one({
-            "project_id":project_id
+    async def get_project_by_id(self, project_id: str):
+        record = await self.collection.find_one({
+            "project_id": project_id
         })
         if record:
             return Project(**record)
         return None
-    async def delete_project_by_id(self,project_id:str):
-        result=await self.collection.delete_one({
-            "project_id":project_id
+    async def delete_project_by_id(self, project_id: str):
+        result = await self.collection.delete_one({
+            "project_id": project_id
         })
         return result.deleted_count > 0
     async def get_all_projects(self, page: int = 1, page_size: int = 10):

@@ -5,12 +5,6 @@ class LLMConfig:
     PROVIDER_GEMINI = "gemini"
     PROVIDER_GROQ = "groq"
 
-    # ── Default Model Settings ───────────────────────────────────
-    DEFAULT_GEMINI_MODEL: str = "gemini-2.5-flash"
-    DEFAULT_GROQ_MODEL: str = "llama-3.1-8b-instant"
-    DEFAULT_EMBEDDING_MODEL: str = "gemini-embedding-001"
-    DEFAULT_EMBEDDING_DIMENSION: int = 768
-
     # ── Groq Model Catalog ───────────────────────────────────────
     GROQ_MODELS: dict[str, str] = {
         "llama-3.1-8b": "llama-3.1-8b-instant",         # Speed
@@ -30,3 +24,6 @@ class LLMConfig:
         "gemini-1.5-pro":        "gemini-1.5-pro",          # Legacy, more capable
         "gemini-3-pro-preview":  "gemini-3-pro-preview",    # Latest preview
     }
+
+    # Note: Default models and API keys are now managed via Settings (utils.config)
+    # This class only contains provider identifiers and model catalogs

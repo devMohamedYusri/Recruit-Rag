@@ -1,0 +1,1016 @@
+# Recruit RAG — Frontend API Documentation
+
+> **Base URL**: `http://localhost:8000`
+> **API Prefix**: `/api/v1`
+> **App Version**: 0.4 &nbsp;|&nbsp; **CORS**: Enabled (all origins by default)
+
+---
+
+## Table of Contents
+
+1. [Architecture Overview](#1-architecture-overview)
+2. [Core Concepts](#2-core-concepts)
+3. [API Endpoint Reference](#3-api-endpoint-reference)
+   - [Health & Info](#31-health--info)
+   - [Project Management](#32-project-management)
+   - [File Upload](#33-file-upload)
+   - [Resume Management](#34-resume-management)
+   - [Asset Management](#35-asset-management)
+   - [Job Description](#36-job-description)
+   - [Resume Processing Pipeline](#37-resume-processing-pipeline)
+   - [Candidate Screening](#38-candidate-screening)
+   - [Vector Search](#39-vector-search)
+   - [Analytics & Usage](#310-analytics--usage)
+4. [TypeScript Interfaces](#4-typescript-interfaces)
+5. [Screening Result Schema](#5-screening-result-schema)
+6. [Streaming Protocol (NDJSON)](#6-streaming-protocol-ndjson)
+7. [Error Handling](#7-error-handling)
+8. [Frontend Integration Workflow](#8-frontend-integration-workflow)
+
+---
+
+## 1. Architecture Overview
+
+```mermaid
+flowchart TD
+  FE["Frontend App"] -->|REST / NDJSON Stream| API["FastAPI Backend"]
+  API --> MONGO["MongoDB"]
+  API --> QDRANT["Qdrant Vector DB"]
+  API --> GEMINI["Gemini LLM"]
+
+  subgraph Pipeline
+    UPLOAD["1. Upload CVs"] --> PROCESS["2. Process Resumes"]
+    PROCESS --> CHUNK["   Chunk & Vectorize"]
+    JD["3. Set Job Description"] --> SCREEN["4. Screen Candidates"]
+    CHUNK --> SCREEN
+  end
+```
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| API Framework | FastAPI | Async REST API |
+| Database | MongoDB | Stores projects, resumes, assets, JDs, usage logs |
+| Vector Store | Qdrant | Hybrid search (dense + sparse BM25) for candidate ranking |
+| LLM | Gemini 2.5 Flash | Screening & extraction; Flash-Lite for CV parsing |
+| Embeddings | gemini-embedding-001 | 768-dim vectors for semantic search |
+
+---
+
+## 2. Core Concepts
+
+### Project Scoping
+**Everything is scoped by [project_id](file:///c:/Users/Mohamed/test/recruit_rag/src/models/JobDescriptionModel.py#48-53)** — an alphanumeric string that groups CVs, JDs, vectors, and results.
+
+> [!IMPORTANT]
+> [project_id](file:///c:/Users/Mohamed/test/recruit_rag/src/models/JobDescriptionModel.py#48-53) must be **alphanumeric only** (a-z, A-Z, 0-9). No spaces, dashes, or special characters. Projects are **auto-created** on first use (upload or process).
+
+### Pipeline Flow
+```
+1. Upload CVs → 2. Process Resumes → 3. Set Job Description → 4. Screen Candidates
+```
+Steps 3–4 can be repeated independently (change JD → re-screen).
+
+### Smart Screening
+The backend supports two screening modes:
+- **Full Screen** (`smart_screen=false`): Every resume gets an LLM analysis
+- **Smart Screen** (`smart_screen=true`, default): Resumes are pre-ranked using vector similarity, then split into tiers:
+  - **Top tier** → Full LLM screening
+  - **Bottom tier** → Fast keyword-based "light screen" (no LLM cost)
+
+---
+
+## 3. API Endpoint Reference
+
+### 3.1 Health & Info
+
+#### `GET /api/v1/`
+App welcome / basic info.
+
+**Response** `200`:
+```json
+{ "message": "Hello, welcome home", "version": "0.4", "name": "Recruit-Rag" }
+```
+
+#### `GET /api/v1/health`
+Health check for frontend monitoring/polling.
+
+**Response** `200`:
+```json
+{ "status": "healthy", "version": "0.4", "name": "Recruit-Rag" }
+```
+
+---
+
+### 3.2 Project Management
+
+#### `GET /api/v1/data/projects`
+List all projects with pagination.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `page` | query int | `1` | Page number (≥1) |
+| `page_size` | query int | `10` | Items per page (1–100) |
+
+**Response** `200`:
+```json
+{
+  "page": 1,
+  "page_size": 10,
+  "total_pages": 3,
+  "projects": [
+    { "_id": "65f...", "project_id": "hiring2026q1" }
+  ]
+}
+```
+
+---
+
+#### `GET /api/v1/data/project/{project_id}`
+Project details with resource counts.
+
+**Response** `200`:
+```json
+{
+  "project_id": "hiring2026q1",
+  "resume_count": 25,
+  "asset_count": 25,
+  "has_job_description": true,
+  "job_description_title": "Senior Backend Engineer"
+}
+```
+
+**Error** `404`: `{ "detail": "Project 'xxx' not found" }`
+
+---
+
+#### `DELETE /api/v1/data/project/{project_id}`
+**Cascade delete** — removes the project and ALL related data: assets, resumes, chunks, job description, vectors, and usage logs.
+
+> [!CAUTION]
+> This is **irreversible**. All data for this project is permanently deleted.
+
+**Response** `200`:
+```json
+{
+  "message": "Project 'hiring2026q1' and all related data deleted",
+  "deleted": {
+    "resumes": 25,
+    "assets": 25,
+    "chunks": 180,
+    "job_descriptions": 1,
+    "usage_logs": 50,
+    "vectors": true,
+    "project": true
+  }
+}
+```
+
+---
+
+### 3.3 File Upload
+
+#### `POST /api/v1/data/upload/{project_id}`
+Upload resume files. Accepts PDF, DOCX, TXT, or ZIP archives.
+
+**Content-Type**: `multipart/form-data`
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| [project_id](file:///c:/Users/Mohamed/test/recruit_rag/src/models/JobDescriptionModel.py#48-53) | path string | ✅ | Target project (auto-created if new) |
+| [files](file:///c:/Users/Mohamed/test/recruit_rag/src/controllers/DataController.py#145-169) | form File[] | ✅ | One or more resume files or ZIP archives |
+
+**Constraints**:
+
+| Limit | Value |
+|-------|-------|
+| Max files per upload | 200 (including ZIP contents) |
+| Max total upload size | 50 MB |
+| Max individual file size | 10 MB |
+| Allowed extensions | `pdf`, `docx`, [txt](file:///c:/Users/Mohamed/test/recruit_rag/requirements.txt) |
+
+**Response** `201`:
+```json
+{
+  "message": "Successfully uploaded 5 files",
+  "files": [
+    { "file_name": "hiring2026q1_a1b2c3d4.pdf", "file_id": "hiring2026q1_a1b2c3d4.pdf" }
+  ],
+  "status": "success"
+}
+```
+
+> [!NOTE]
+> Files are **renamed** on upload (format: `{project_id}_{uuid}.{ext}`). The returned [file_id](file:///c:/Users/Mohamed/test/recruit_rag/src/models/ResumeModel.py#51-57) is what you use in all subsequent API calls.
+
+**JS Upload Example**:
+```javascript
+const formData = new FormData();
+files.forEach(file => formData.append('files', file));
+
+const response = await fetch(`/api/v1/data/upload/${projectId}`, {
+  method: 'POST',
+  body: formData, // No Content-Type header — browser sets it with boundary
+});
+```
+
+---
+
+### 3.4 Resume Management
+
+#### `GET /api/v1/data/resumes/{project_id}`
+List all resumes for a project (**summary view** — excludes `full_content` and [parsed_data](file:///c:/Users/Mohamed/test/recruit_rag/src/controllers/ResumeProcessor.py#185-238) for performance).
+
+**Response** `200`:
+```json
+{
+  "project_id": "hiring2026q1",
+  "total": 25,
+  "resumes": [
+    {
+      "_id": "65f1a2b3c4d5e6f7a8b9c0d1",
+      "file_id": "hiring2026q1_a1b2c3d4.pdf",
+      "candidate_name": "John Doe",
+      "contact_info": { "email": "john@example.com", "phone": null, "linkedin": null, "location": "Cairo" },
+      "extraction_method": "local",
+      "created_at": "2026-02-20T06:00:00"
+    }
+  ]
+}
+```
+
+---
+
+#### `GET /api/v1/data/resume/{cv_id}`
+Full resume details by MongoDB [_id](file:///c:/Users/Mohamed/test/recruit_rag/src/models/AssetModel.py#36-43).
+
+**Response** `200`:
+```json
+{
+  "_id": "65f1a2b3c4d5e6f7a8b9c0d1",
+  "project_id": "hiring2026q1",
+  "file_id": "hiring2026q1_a1b2c3d4.pdf",
+  "candidate_name": "John Doe",
+  "contact_info": {
+    "email": "john@example.com",
+    "phone": "+1234567890",
+    "linkedin": "https://linkedin.com/in/johndoe",
+    "location": "Cairo, Egypt"
+  },
+  "full_content": "Full extracted text of the resume...",
+  "parsed_data": {
+    "summary": "Experienced software engineer with 5+ years...",
+    "work_history": [
+      { "title": "Senior Developer", "company": "TechCorp", "dates": "2020 - Present", "description": "Led development..." }
+    ],
+    "education": [
+      { "degree": "BSc Computer Science", "institution": "Cairo University", "dates": "2012 - 2016" }
+    ],
+    "skills": ["Python", "FastAPI", "React"],
+    "certifications": ["AWS Solutions Architect"],
+    "projects": [
+      { "name": "AI Screener", "description": "Built an automated..." }
+    ],
+    "languages": ["English", "Arabic"]
+  },
+  "extraction_method": "local",
+  "created_at": "2026-02-20T06:00:00"
+}
+```
+
+---
+
+#### `POST /api/v1/data/resumes/batch`
+Bulk fetch full resume details by IDs.
+
+**Request**:
+```json
+{ "cv_ids": ["65f1a2b3c4d5e6f7a8b9c0d1", "65f1a2b3c4d5e6f7a8b9c0d2"] }
+```
+
+**Response** `200`:
+```json
+{ "total": 2, "resumes": [ /* full Resume objects */ ] }
+```
+
+---
+
+### 3.5 Asset Management
+
+#### `GET /api/v1/data/assets/{project_id}`
+List all uploaded file assets for a project.
+
+**Response** `200`:
+```json
+{
+  "project_id": "hiring2026q1",
+  "total": 5,
+  "assets": [
+    {
+      "_id": "65f...",
+      "name": "hiring2026q1_a1b2c3d4.pdf",
+      "type": "application/octet-stream",
+      "size_in_bytes": 245760,
+      "created_at": "2026-02-20T06:00:00"
+    }
+  ]
+}
+```
+
+---
+
+### 3.6 Job Description
+
+#### `POST /api/v1/llm/job-description/{project_id}`
+Create or update the job description. **Must be called before screening.**
+
+**Request**:
+```json
+{
+  "title": "Senior Backend Engineer",
+  "description": "We need a senior backend engineer with 5+ years Python, FastAPI, cloud services...",
+  "prompt": "Focus on candidates with API design experience",
+  "weights": { "technical_skills": 0.4, "experience": 0.3, "education": 0.15, "soft_skills": 0.15 },
+  "custom_rubric": "Must have: Python 5+ years. Nice to have: Go, Rust."
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `title` | string | ✅ | Job title |
+| [description](file:///c:/Users/Mohamed/test/recruit_rag/src/routes/llm.py#88-113) | string | ✅ | Full job description |
+| `prompt` | string | ❌ | Extra LLM screening instructions |
+| `weights` | `{string: number}` | ❌ | Category scoring weights (should sum to 1.0) |
+| `custom_rubric` | string | ❌ | Custom evaluation criteria |
+
+**Response** `201`:
+```json
+{ "signal": "job_description_saved", "project_id": "hiring2026q1", "title": "Senior Backend Engineer" }
+```
+
+---
+
+#### `GET /api/v1/llm/job-description/{project_id}`
+Retrieve the current job description for display or pre-filling an edit form.
+
+**Response** `200`:
+```json
+{
+  "_id": "65f...",
+  "project_id": "hiring2026q1",
+  "title": "Senior Backend Engineer",
+  "description": "We need a senior backend engineer...",
+  "prompt": "Focus on candidates with API design experience",
+  "weights": { "technical_skills": 0.4, "experience": 0.3 },
+  "custom_rubric": "Must have: Python 5+ years.",
+  "created_at": "2026-02-20T06:00:00",
+  "updated_at": "2026-02-20T06:30:00"
+}
+```
+
+**Error** `404`: `{ "detail": "No job description found for project 'xxx'" }`
+
+---
+
+### 3.7 Resume Processing Pipeline
+
+#### `POST /api/v1/llm/process-resumes/{project_id}`
+Trigger the full pipeline: **extract text → structure data → chunk → vectorize**.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| [project_id](file:///c:/Users/Mohamed/test/recruit_rag/src/models/JobDescriptionModel.py#48-53) | path string | — | Target project |
+| [stream](file:///c:/Users/Mohamed/test/recruit_rag/src/controllers/ScreeningController.py#329-359) | query bool | `false` | Return NDJSON progress stream (see [Process Streaming](#process-resumes-streaming-protocol)) |
+
+> [!TIP]
+> Use `stream=true` to get real-time progress updates instead of waiting for the full pipeline to complete.
+
+**Request**:
+```json
+{
+  "file_ids": ["hiring2026q1_abc123.pdf"],
+  "do_reset": false
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| [file_ids](file:///c:/Users/Mohamed/test/recruit_rag/src/models/ResumeModel.py#51-57) | string[] | `null` | Specific files to process. `null` = ALL uploaded files |
+| `do_reset` | boolean | `false` | `true` = delete all existing resumes/chunks for this project first |
+
+**Response** `200`:
+```json
+{
+  "signal": "resumes_processed",
+  "project_id": "hiring2026q1",
+  "processed": 5,
+  "chunks_created": 42,
+  "errors": [
+    { "file_id": "corrupted.pdf", "error": "Unsupported file extension: xyz" }
+  ]
+}
+```
+
+---
+
+### 3.8 Candidate Screening
+
+#### `POST /api/v1/llm/screen/{project_id}`
+Screen resumes against the job description.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| [project_id](file:///c:/Users/Mohamed/test/recruit_rag/src/models/JobDescriptionModel.py#48-53) | path string | — | Target project |
+| [smart_screen](file:///c:/Users/Mohamed/test/recruit_rag/src/controllers/ScreeningController.py#286-326) | query bool | `true` | Use vector pre-ranking + tiered screening |
+| [stream](file:///c:/Users/Mohamed/test/recruit_rag/src/controllers/ScreeningController.py#329-359) | query bool | `false` | Return NDJSON stream instead of JSON |
+
+**Request**:
+```json
+{ "file_ids": null, "anonymize": true }
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| [file_ids](file:///c:/Users/Mohamed/test/recruit_rag/src/models/ResumeModel.py#51-57) | string[] | `null` | Specific files to screen. `null` = ALL |
+| [anonymize](file:///c:/Users/Mohamed/test/recruit_rag/src/controllers/ScreeningController.py#63-69) | boolean | `true` | Redact names & contact info |
+
+**Non-Streaming Response** `200`:
+```json
+{
+  "signal": "screening_complete",
+  "project_id": "hiring2026q1",
+  "total_screened": 10,
+  "results": [ /* ScreeningResult objects — see Section 5 */ ]
+}
+```
+
+**Streaming** — see [Section 6](#6-streaming-protocol-ndjson).
+
+---
+
+### 3.9 Vector Search
+
+#### `POST /api/v1/vectors/candidate/search/{project_id}`
+Semantic search across resume chunk vectors.
+
+**Request**:
+```json
+{ "query_text": "Python developer with microservices experience", "k": 10 }
+```
+
+**Response** `200`:
+```json
+{
+  "results": [
+    {
+      "content": "Senior Developer at TechCorp (2020 - Present)...",
+      "metadata": { "file_id": "hiring2026q1_abc123.pdf", "section_type": "work_history" },
+      "score": 0.89
+    }
+  ]
+}
+```
+
+> [!TIP]
+> Also available as `POST /api/v1/vectors/candidate/search` with [project_id](file:///c:/Users/Mohamed/test/recruit_rag/src/models/JobDescriptionModel.py#48-53) in the body.
+
+---
+
+#### `GET /api/v1/vectors/candidate/info/{project_id}`
+Vector collection stats.
+
+**Response** `200`:
+```json
+{ "collection_info": { "vectors_count": 150, "indexed_vectors_count": 150, "points_count": 150, "status": "green" } }
+```
+
+---
+
+### 3.10 Analytics & Usage
+
+#### `GET /api/v1/analytics/summary/{project_id}`
+Full project usage summary.
+
+**Response** `200`:
+```json
+{
+  "project_id": "hiring2026q1",
+  "total_requests": 25,
+  "total_input_tokens": 150000,
+  "total_output_tokens": 50000,
+  "total_tokens": 200000,
+  "average_latency_ms": 1200,
+  "by_action": {
+    "screening": { "count": 10, "input_tokens": 100000, "output_tokens": 40000, "total_tokens": 140000, "avg_latency_ms": 2000 },
+    "cv_extraction_fallback": { "count": 3, "input_tokens": 20000, "output_tokens": 5000, "total_tokens": 25000, "avg_latency_ms": 800 },
+    "cv_structuring_batch": { "count": 5, "input_tokens": 25000, "output_tokens": 4000, "total_tokens": 29000, "avg_latency_ms": 600 },
+    "jd_extraction": { "count": 1, "input_tokens": 500, "output_tokens": 100, "total_tokens": 600, "avg_latency_ms": 300 }
+  },
+  "by_model": {
+    "gemini-2.5-flash": { "count": 15, "input_tokens": 120000, "output_tokens": 45000, "total_tokens": 165000, "avg_latency_ms": 1500 }
+  }
+}
+```
+
+---
+
+#### `GET /api/v1/analytics/files/{project_id}`
+Per-file token/latency breakdown.
+
+**Response** `200`:
+```json
+{
+  "project_id": "hiring2026q1",
+  "files": [
+    {
+      "file_id": "hiring2026q1_abc123.pdf",
+      "total_input_tokens": 15000,
+      "total_output_tokens": 4000,
+      "total_tokens": 19000,
+      "average_latency_ms": 1100,
+      "request_count": 3,
+      "actions": ["cv_extraction_fallback", "screening"],
+      "models": ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    }
+  ]
+}
+```
+
+---
+
+#### `GET /api/v1/analytics/logs/{project_id}`
+Paginated raw usage logs.
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `page` | query int | `1` | Page (≥1) |
+| `page_size` | query int | `50` | Per page (1–200) |
+
+**Response** `200`:
+```json
+{
+  "project_id": "hiring2026q1",
+  "page": 1, "page_size": 50, "total_logs": 120, "total_pages": 3,
+  "logs": [
+    {
+      "id": "65f...",
+      "file_id": "hiring2026q1_abc123.pdf",
+      "timestamp": "2026-02-20T06:30:00",
+      "model": "gemini-2.5-flash",
+      "action": "screening",
+      "input_tokens": 5000,
+      "output_tokens": 1500,
+      "total_tokens": 6500,
+      "latency_ms": 2100
+    }
+  ]
+}
+```
+
+---
+
+## 4. TypeScript Interfaces
+
+```typescript
+// ── Core Models ─────────────────────────────────────────────────────────
+
+interface Project {
+  _id?: string;
+  project_id: string;
+}
+
+interface ProjectDetail {
+  project_id: string;
+  resume_count: number;
+  asset_count: number;
+  has_job_description: boolean;
+  job_description_title: string | null;
+}
+
+interface Asset {
+  _id: string;
+  name: string;         // This is the file_id used in other endpoints
+  type: string;
+  size_in_bytes: number;
+  created_at: string;
+}
+
+interface ContactInfo {
+  email: string | null;
+  phone: string | null;
+  linkedin: string | null;
+  location: string | null;
+}
+
+interface WorkHistory {
+  title: string;
+  company: string;
+  dates: string;
+  description: string;
+}
+
+interface Education {
+  degree: string;
+  institution: string;
+  dates: string;
+}
+
+interface ParsedData {
+  summary: string;
+  work_history: WorkHistory[];
+  education: Education[];
+  skills: string[];
+  certifications: string[];
+  projects: { name: string; description: string }[];
+  languages: string[];
+}
+
+interface ResumeSummary {
+  _id: string;
+  file_id: string;
+  candidate_name: string;
+  contact_info: ContactInfo;
+  extraction_method: 'local' | 'gemini_fallback';
+  created_at: string;
+}
+
+interface Resume extends ResumeSummary {
+  project_id: string;
+  full_content: string;
+  parsed_data: ParsedData;
+}
+
+interface JobDescription {
+  _id: string;
+  project_id: string;
+  title: string;
+  description: string;
+  prompt?: string;
+  weights?: Record<string, number>;
+  custom_rubric?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Screening ───────────────────────────────────────────────────────────
+
+interface ExperienceAnalysis {
+  total_relevant_experience_years: number;
+  required_years: number;
+  seniority_level: 'Junior' | 'Mid' | 'Senior' | 'Lead';
+  seniority_alignment: 'Below Requirements' | 'Meets Requirements' | 'Exceeds Requirements';
+  role_fit_justification: string;
+}
+
+interface ScreeningResult {
+  fit_score: number;                    // 0–100
+  fit_label: 'Low Match' | 'Medium Match' | 'High Match' | 'Excellent Match' | 'Light Match' | 'Error';
+  executive_summary: string;
+  cv_id: string;                        // MongoDB _id of the resume
+  candidate_name: string;               // "[REDACTED]" when anonymized
+  contact_info: ContactInfo | {};       // {} when anonymized
+  key_match_analysis: {
+    strengths: string[];
+    missing_critical_skills: string[];
+    experience_analysis: ExperienceAnalysis;
+  };
+  flags: {
+    red_flags: string[];
+    yellow_flags: string[];
+  };
+  interview_prep: {
+    interview_recommendation?: string;
+    suggested_questions: string[];
+  };
+  meta: {
+    method: 'LLM Screen' | 'Light Screen (Keyword Match)';
+    model: string;
+    usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+    tier?: string;
+  };
+}
+
+// ── Streaming Signals ───────────────────────────────────────────────────
+
+interface StreamMeta {
+  signal: 'meta';
+  total: number;
+  top_tier_count?: number;    // Only when smart_screen=true
+  bottom_tier_count?: number; // Only when smart_screen=true
+}
+
+interface StreamComplete {
+  signal: 'complete';
+  processed?: number;
+}
+
+type StreamMessage = StreamMeta | StreamComplete | ScreeningResult;
+
+// ── Analytics ───────────────────────────────────────────────────────────
+
+interface UsageSummary {
+  project_id: string;
+  total_requests: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_tokens: number;
+  average_latency_ms: number;
+  by_action: Record<string, ActionBreakdown>;
+  by_model: Record<string, ActionBreakdown>;
+}
+
+interface ActionBreakdown {
+  count: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+}
+
+interface UsageLog {
+  id: string;
+  file_id: string | null;
+  timestamp: string;
+  model: string;
+  action: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  latency_ms: number;
+}
+```
+
+---
+
+## 5. Screening Result Schema
+
+### Fit Score Ranges
+| Score | Label | Color Suggestion |
+|-------|-------|-----------------|
+| 0–30 | Low Match | `red` / `#ef4444` |
+| 31–60 | Medium Match | `orange` / `#f59e0b` |
+| 61–85 | High Match | `blue` / `#3b82f6` |
+| 86–100 | Excellent Match | `green` / `#22c55e` |
+
+### Smart Screen Tiers
+- **Top tier** (full LLM): `meta.method === "LLM Screen"` — detailed analysis
+- **Bottom tier** (light): `meta.method === "Light Screen (Keyword Match)"` — keyword-based, `experience_analysis` shows `"Unverified"`
+
+### Anonymization Behavior
+| [anonymize](file:///c:/Users/Mohamed/test/recruit_rag/src/controllers/ScreeningController.py#63-69) | `candidate_name` | `contact_info` |
+|-------------|-----------------|----------------|
+| `true` (default) | `"[REDACTED]"` | `{}` |
+| `false` | Real name | Full contact info |
+
+---
+
+## 6. Streaming Protocols (NDJSON)
+
+### Process Resumes Streaming Protocol
+
+Call `POST /api/v1/llm/process-resumes/{project_id}?stream=true` to get real-time progress.
+
+**Content-Type**: `application/x-ndjson`
+
+#### Phases (in order)
+
+| Phase | Description |
+|-------|-------------|
+| `extracting` | Parsing text from uploaded files (PDF/DOCX/TXT) |
+| `structuring` | LLM-based resume parsing into structured JSON |
+| `chunking` | Splitting resumes into vector-ready chunks |
+| `vectorizing` | Upserting chunk embeddings to vector DB |
+| `complete` | Pipeline finished — contains final results |
+| [error](file:///c:/Users/Mohamed/test/recruit_rag/src/controllers/ScreeningController.py#27-37) | Fatal pipeline error |
+
+#### Message Stream Example
+```
+{"phase":"extracting","total":10,"completed":0}
+{"phase":"extracting","total":10,"completed":1,"file_id":"proj_abc.pdf","status":"done"}
+{"phase":"extracting","total":10,"completed":2,"file_id":"proj_def.docx","status":"done"}
+...
+{"phase":"structuring","total":10,"completed":0}
+{"phase":"structuring","total":10,"completed":3,"file_ids":["proj_abc.pdf","proj_def.docx","proj_ghi.txt"],"status":"done"}
+...
+{"phase":"chunking","total":10,"completed":0}
+{"phase":"chunking","total":10,"completed":1,"file_id":"proj_abc.pdf","chunks":8,"status":"done"}
+...
+{"phase":"vectorizing","total":80}
+{"phase":"complete","processed":10,"chunks_created":80,"errors":[]}
+```
+
+#### Error in a Single File
+If one file fails, the stream continues. Failed files appear with `"status":"error"`:
+```json
+{"phase":"extracting","total":10,"completed":5,"file_id":"bad.xyz","status":"error","error":"Unsupported file extension"}
+```
+
+#### Frontend Consumption
+```javascript
+async function streamProcessing(projectId, fileIds = null, onProgress) {
+  const res = await fetch(
+    `/api/v1/llm/process-resumes/${projectId}?stream=true`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_ids: fileIds, do_reset: false }),
+    }
+  );
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const data = JSON.parse(line);
+      onProgress(data); // { phase, total, completed, file_id, status }
+    }
+  }
+}
+
+// Usage:
+await streamProcessing('hiring2026q1', null, (progress) => {
+  setPhase(progress.phase);
+  if (progress.total) setProgressBar(progress.completed / progress.total);
+  if (progress.phase === 'complete') {
+    setResult(progress); // { processed, chunks_created, errors }
+  }
+});
+```
+
+---
+
+### Screening Streaming Protocol
+
+Call `POST /api/v1/llm/screen/{project_id}?stream=true` to get a **newline-delimited JSON** stream.
+
+**Content-Type**: `application/x-ndjson`
+
+### Message Order
+```
+1. {"signal": "meta", "total": 25, ...}       ← First line (metadata)
+2. {"fit_score": 45, "cv_id": "...", ...}      ← Bottom-tier results (instant)
+3. {"fit_score": 45, "cv_id": "...", ...}      ←   ...more bottom tier
+4. {"fit_score": 82, "cv_id": "...", ...}      ← Top-tier results (as LLM completes)
+5. {"fit_score": 91, "cv_id": "...", ...}      ←   ...arrive in non-deterministic order
+6. {"signal": "complete"}                       ← Final line
+```
+
+### Frontend Consumption (JavaScript)
+```javascript
+async function streamScreening(projectId, options = {}) {
+  const { anonymize = false, smartScreen = true, onMeta, onResult, onComplete } = options;
+
+  const response = await fetch(
+    `/api/v1/llm/screen/${projectId}?stream=true&smart_screen=${smartScreen}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ anonymize }),
+    }
+  );
+
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop(); // Keep any incomplete line
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const data = JSON.parse(line);
+
+      if (data.signal === 'meta')          onMeta?.(data);
+      else if (data.signal === 'complete') onComplete?.(data);
+      else                                 onResult?.(data); // ScreeningResult
+    }
+  }
+}
+
+// Usage:
+const results = [];
+await streamScreening('hiring2026q1', {
+  anonymize: false,
+  onMeta: (meta) => setTotal(meta.total),
+  onResult: (result) => {
+    results.push(result);
+    setProgress(results.length);
+  },
+  onComplete: () => {
+    results.sort((a, b) => b.fit_score - a.fit_score);
+    setResults(results);
+    setLoading(false);
+  },
+});
+```
+
+> [!TIP]
+> Bottom-tier results arrive **instantly** (no LLM call). Top-tier results stream **as each LLM call completes**. Sort by `fit_score` for final display.
+
+---
+
+## 7. Error Handling
+
+### Standard Error Format
+```json
+{ "detail": "Human-readable error message" }
+```
+
+### Status Codes
+
+| Code | Meaning | When |
+|------|---------|------|
+| `400` | Bad Request | Invalid files, too many files, bad ZIP, missing required field |
+| `404` | Not Found | Project, resume, or JD not found |
+| `422` | Validation Error | Pydantic schema validation failure |
+| `500` | Server Error | Unexpected backend error |
+
+### Pydantic Validation (422) Format
+```json
+{
+  "detail": [
+    { "loc": ["body", "title"], "msg": "String should have at least 1 character", "type": "string_too_short" }
+  ]
+}
+```
+
+### Recommended Frontend Error Handling
+```javascript
+async function apiCall(url, options) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    const error = await res.json();
+    const message = typeof error.detail === 'string'
+      ? error.detail
+      : error.detail?.map(e => e.msg).join(', ') || 'Unknown error';
+    throw new Error(message);
+  }
+  return res.json();
+}
+```
+
+---
+
+## 8. Frontend Integration Workflow
+
+```mermaid
+sequenceDiagram
+    participant FE as Frontend
+    participant API as Backend API
+
+    Note over FE,API: ① Project Setup
+    FE->>API: GET /data/projects
+    API-->>FE: { projects: [...] }
+    FE->>API: POST /data/upload/hiring2026q1 [files]
+    API-->>FE: 201 { files: [{file_id: "..."}] }
+
+    Note over FE,API: ② Process Resumes (long-running)
+    FE->>API: POST /llm/process-resumes/hiring2026q1
+    Note right of API: Extract → Structure → Chunk → Vectorize
+    API-->>FE: 200 { processed: 10, chunks_created: 80 }
+
+    Note over FE,API: ③ Configure Job Description
+    FE->>API: POST /llm/job-description/hiring2026q1 {title, description, ...}
+    API-->>FE: 201 { signal: "job_description_saved" }
+
+    Note over FE,API: ④ Screen Candidates (streaming)
+    FE->>API: POST /llm/screen/hiring2026q1?stream=true
+    API-->>FE: {signal: "meta", total: 25}
+    loop Each candidate
+        API-->>FE: {fit_score: 78, cv_id: "...", ...}
+    end
+    API-->>FE: {signal: "complete"}
+
+    Note over FE,API: ⑤ View Details
+    FE->>API: POST /data/resumes/batch {cv_ids: [...]}
+    API-->>FE: { resumes: [...full details] }
+    FE->>API: GET /analytics/summary/hiring2026q1
+    API-->>FE: { total_tokens: 200000, by_action: {...} }
+```
+
+### Step-by-Step Checklist
+1. **Show/create project** — `GET /data/projects` or generate a new [project_id](file:///c:/Users/Mohamed/test/recruit_rag/src/models/JobDescriptionModel.py#48-53)
+2. **Upload CVs** — `POST /data/upload/{project_id}` (`multipart/form-data`)
+3. **Process resumes** — `POST /llm/process-resumes/{project_id}` (show spinner)
+4. **Set job description** — `POST /llm/job-description/{project_id}`
+5. **Screen** — `POST /llm/screen/{project_id}?stream=true` (show progress bar)
+6. **View details** — `POST /data/resumes/batch` for selected candidates
+7. **Analytics** — `GET /analytics/summary/{project_id}` for usage dashboard
+8. **Manage** — `GET /data/project/{project_id}` for overview, `DELETE` for cleanup
+
+> [!CAUTION]
+> **No authentication** is currently implemented. All endpoints are publicly accessible. Handle auth in a reverse proxy or add middleware before production deployment.

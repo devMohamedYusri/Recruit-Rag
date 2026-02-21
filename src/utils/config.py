@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     # ── Application Settings ─────────────────────────────────────────────
     APP_NAME: str = Field(default="Recruit-Rag")
     APP_VERSION: str = Field(default="0.4")
+    CORS_ORIGINS: list[str] = Field(default=["*"])
 
     # ── File Upload Settings ─────────────────────────────────────────────
     FILE_MAX_SIZE_MB: int = Field(default=10)
@@ -58,6 +59,11 @@ class Settings(BaseSettings):
     DB_DIRECTORY: str = Field(default="assets/database")
     VECTOR_DB_NAME: str = Field(default="vector_db")
     VECTOR_DB_DISTANCE: str = Field(default="cosine")
+    VECTOR_DB_COLLECTION_NAME: str = Field(default="recruit_rag_vectors")
+
+    # ── Fallback Configuration ──────────────────────────────────────────
+    ENABLE_LLM_FALLBACK: bool = Field(default=True)
+    DEFAULT_GROQ_MODEL: str = Field(default="llama-3.1-8b-instant")
 
 
 

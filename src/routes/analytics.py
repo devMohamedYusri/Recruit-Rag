@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, status, Query
-from models.UsageLogModel import UsageLogModel
+from models import UsageLogModel
 
 analytics_router = APIRouter(
     prefix="/api/v1/analytics",

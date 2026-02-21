@@ -174,3 +174,22 @@ class DataController(BaseController):
         project_path = project_controller.get_project_asset_path(project_id)
         file_path = os.path.join(project_path, new_file_name)
         return file_path, new_file_name
+
+    async def delete_asset(self, asset_id: str, asset_model):
+        """Delete an asset from disk and database."""
+        asset = await asset_model.get_asset_by_id(asset_id)
+        if not asset:
+            return False, f"Asset '{asset_id}' not found"
+
+        # 1. Delete from disk
+        if asset.url and os.path.exists(asset.url):
+            try:
+                os.remove(asset.url)
+            except Exception as e:
+                logger.warning(f"Failed to delete file from disk: {e}")
+
+        # 2. Delete from DB
+        success = await asset_model.delete_asset_by_id(asset_id)
+        if success:
+            return True, f"Asset '{asset_id}' deleted successfully"
+        return False, "Failed to delete asset from database"
