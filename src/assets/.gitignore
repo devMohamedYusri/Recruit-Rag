@@ -1,2 +1,6 @@
-files
-database
+# Ignore everything in this directory
+*
+
+# Except these files so the folder stays in git
+!.gitignore
+!.gitkeep

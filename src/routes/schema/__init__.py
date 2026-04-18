@@ -1,2 +1,2 @@
-from .data import ProcessRequest
-from .vectors import UpsertVectorsRequest,SearchVectorsRequest
+from .vectors import SearchVectorsRequest
+from .llm_schema import JobDescriptionRequest, ProcessResumesRequest, ScreenRequest

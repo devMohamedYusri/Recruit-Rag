@@ -12,6 +12,7 @@
   <a href="#features">Features</a> •
   <a href="#tech-stack">Tech Stack</a> •
   <a href="#getting-started">Getting Started</a> •
+  <a href="#deployment">Deployment</a> •
   <a href="#api-reference">API Reference</a> •
   <a href="#license">License</a>
 </p>
@@ -34,8 +35,10 @@
 | 📄 **Multi-Format Support** | Process resumes in PDF, DOCX, and TXT formats seamlessly |
 | ⚡ **Smart Chunking** | Intelligent document processing with configurable chunk sizes for optimal retrieval |
 | 📊 **Project Organization** | Organize candidates into separate projects for different job openings |
-| 🗄️ **MongoDB Storage** | Robust async document storage with MongoDB for scalability |
-| 🐳 **Docker Ready** | One-command deployment with Docker Compose |
+| 🗄️ **MongoDB Atlas** | Robust async document storage with MongoDB Atlas for scalability |
+| 🔒 **JWT Authentication** | Secure API with token-based authentication and plan-based access control |
+| 📈 **LangSmith Tracing** | Full observability of all LLM calls for debugging and optimization |
+| 🐳 **Docker Ready** | One-command deployment with Docker |
 
 ---
 
@@ -48,19 +51,27 @@
 </tr>
 <tr>
 <td><strong>AI/NLP</strong></td>
-<td>LangChain, LangChain Community Loaders</td>
+<td>LangChain, Google Gemini</td>
 </tr>
 <tr>
 <td><strong>Database</strong></td>
-<td>MongoDB (Async with Motor)</td>
+<td>MongoDB Atlas (Async with PyMongo)</td>
+</tr>
+<tr>
+<td><strong>Vector Store</strong></td>
+<td>Qdrant Cloud</td>
 </tr>
 <tr>
 <td><strong>Document Processing</strong></td>
-<td>PyMuPDF4LLM, Docx2txt, RecursiveCharacterTextSplitter</td>
+<td>PyMuPDF4LLM, python-docx, Unstructured</td>
 </tr>
 <tr>
-<td><strong>Infrastructure</strong></td>
-<td>Docker, Docker Compose</td>
+<td><strong>Hosting</strong></td>
+<td>Render (Free Tier)</td>
+</tr>
+<tr>
+<td><strong>Observability</strong></td>
+<td>LangSmith</td>
 </tr>
 </table>
 
@@ -69,33 +80,38 @@
 ## 📋 Prerequisites
 
 - **Python 3.11** or later
-- **MongoDB** (local or containerized)
-- **Docker & Docker Compose** (optional, for containerized deployment)
+- **MongoDB Atlas** account (free tier works)
+- **Qdrant Cloud** account (free tier works)
+- **Google AI Studio** API key (for Gemini)
 
 ---
 
 ## 🚀 Getting Started
 
-### Option 1: Using Conda (Recommended)
+### Local Development
 
-**1. Install Miniconda**
-
-Download and install from the [official Miniconda page](https://docs.anaconda.com/free/miniconda/#quick-command-line-install).
-
-**2. Create and activate environment**
+**1. Clone and setup environment**
 
 ```bash
-conda create -n recruit-rag python=3.11
-conda activate recruit-rag
+git clone https://github.com/your-username/recruit_rag.git
+cd recruit_rag
+
+# Using Conda (Recommended)
+conda create -n recruit python=3.11
+conda activate recruit
+
+# Or using venv
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 ```
 
-**3. Install dependencies**
+**2. Install dependencies**
 
 ```bash
 pip install -r requirements.txt
 ```
 
-**4. Configure environment variables**
+**3. Configure environment variables**
 
 ```bash
 cp src/.env.example src/.env
@@ -104,48 +120,75 @@ cp src/.env.example src/.env
 Edit `src/.env` and configure your settings:
 
 ```env
-APP_NAME="Recruit-Rag"
-APP_VERSION="0.1"
-MONGO_DB="mongodb://localhost:27017"
-DB_NAME="recruit_rag"
-FILE_MAX_SIZE_MB=5
-FILE_ALLOWED_TYPES=["text/plain","application/pdf"]
+MONGO_DB="mongodb+srv://<user>:<password>@<cluster>.mongodb.net/"
+DB_NAME="recruit-rag-auth"
+GEMINI_API_KEY="your_gemini_api_key"
+JWT_SECRET_KEY="your_secure_random_secret"
+QDRANT_URL="https://your-cluster.cloud.qdrant.io"
+QDRANT_API_KEY="your_qdrant_api_key"
 ```
 
-**5. Start MongoDB** (using Docker)
-
-```bash
-cd docker
-cp .env.example .env
-# Edit .env with your MongoDB credentials
-docker-compose up -d
-```
-
-**6. Run the server**
+**4. Run the server**
 
 ```bash
 cd src
 uvicorn main:app --reload --host 0.0.0.0 --port 5000
 ```
 
-### Option 2: Using pip directly
+---
 
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+## 🚢 Deployment
 
-# Install dependencies
-pip install -r requirements.txt
+### Render (Recommended)
 
-# Setup environment
-cp src/.env.example src/.env
-# Edit src/.env with your configuration
+This project is configured for one-click deployment on [Render](https://render.com).
 
-# Run server
-cd src
-uvicorn main:app --reload --host 0.0.0.0 --port 5000
+**1. Push to GitHub**
+
+Ensure your code is pushed to a GitHub repository.
+
+**2. Create a Web Service on Render**
+
+- Go to [Render Dashboard](https://dashboard.render.com) → **New** → **Web Service**
+- Connect your GitHub repository
+- Render will auto-detect the `render.yaml` configuration
+
+**3. Set Environment Variables**
+
+In the Render dashboard, add these environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `MONGO_DB` | MongoDB Atlas connection string |
+| `DB_NAME` | Database name |
+| `GEMINI_API_KEY` | Google AI Studio API key |
+| `JWT_SECRET_KEY` | Secure random string (min 32 chars) |
+| `QDRANT_URL` | Qdrant Cloud cluster URL |
+| `QDRANT_API_KEY` | Qdrant Cloud API key |
+| `GROQ_API_KEY` | Groq API key (for fallback) |
+| `S3_ENDPOINT_URL` | S3-compatible storage endpoint |
+| `S3_ACCESS_KEY_ID` | S3 access key |
+| `S3_SECRET_ACCESS_KEY` | S3 secret key |
+| `S3_BUCKET_NAME` | S3 bucket name |
+| `LANGCHAIN_TRACING_V2` | `true` |
+| `LANGCHAIN_API_KEY` | LangSmith API key |
+| `LANGCHAIN_PROJECT` | LangSmith project name |
+| `CORS_ORIGINS` | `["*"]` or your frontend domain |
+
+**4. Deploy**
+
+Render will automatically build and deploy. The service URL will be:
 ```
+https://recruit-rag-api.onrender.com
+```
+
+**5. Keep-Alive (GitHub Actions)**
+
+A GitHub Actions workflow (`.github/workflows/keep-alive.yml`) pings the health endpoint every 10 minutes to prevent the free instance from sleeping.
+
+To set it up:
+1. Go to your GitHub repo → **Settings** → **Secrets and variables** → **Actions**
+2. Add a secret: `RENDER_APP_URL` = `https://recruit-rag-api.onrender.com`
 
 ---
 
@@ -153,7 +196,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 5000
 
 ### Base URL
 ```
-http://localhost:5000/api/v1
+https://your-app.onrender.com/api/v1
 ```
 
 ### Endpoints
@@ -216,26 +259,26 @@ Process uploaded resumes into searchable chunks.
 
 ```
 recruit_rag/
+├── .github/
+│   └── workflows/
+│       └── keep-alive.yml       # Cron to prevent Render sleep
 ├── src/
-│   ├── main.py              # FastAPI application entry point
-│   ├── controllers/         # Business logic layer
-│   │   ├── DataController.py     # File upload & validation
-│   │   ├── ProcessController.py  # Document processing & chunking
-│   │   └── ProjectController.py  # Project management
-│   ├── models/              # Data models & database schemas
-│   │   ├── AssetModel.py         # File asset management
-│   │   ├── ChunkModel.py         # Document chunks
-│   │   └── ProjectModel.py       # Project entities
-│   ├── routes/              # API route definitions
-│   │   ├── base.py               # Health check & base routes
-│   │   └── data.py               # Data upload & processing routes
-│   ├── utils/               # Utility functions & configuration
-│   └── assets/              # Uploaded file storage
-├── docker/
-│   ├── docker-compose.yaml  # MongoDB container configuration
-│   └── .env.example         # Docker environment template
-├── requirements.txt         # Python dependencies
-└── LICENSE                  # MIT License
+│   ├── main.py                  # FastAPI application entry point
+│   ├── controllers/             # Business logic layer
+│   │   ├── DataController.py
+│   │   ├── ScreeningController.py
+│   │   ├── VectorController.py
+│   │   └── PlanGuardService.py
+│   ├── models/                  # Data models & database schemas
+│   ├── routes/                  # API route definitions
+│   ├── stores/                  # LLM & Vector DB providers
+│   ├── utils/                   # Configuration & utilities
+│   └── assets/                  # Uploaded file storage
+├── render.yaml                  # Render deployment config
+├── Dockerfile                   # Docker deployment option
+├── requirements.txt             # Python dependencies
+├── .python-version              # Python version pin
+└── LICENSE                      # MIT License
 ```
 
 ---
@@ -245,22 +288,13 @@ recruit_rag/
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
 | `APP_NAME` | Application name | `Recruit-Rag` |
-| `APP_VERSION` | Application version | `0.1` |
+| `APP_VERSION` | Application version | `0.9` |
 | `MONGO_DB` | MongoDB connection string | - |
 | `DB_NAME` | Database name | - |
-| `FILE_MAX_SIZE_MB` | Maximum file size in MB | `5` |
-| `FILE_ALLOWED_TYPES` | Allowed MIME types | `["text/plain", "application/pdf"]` |
-
----
-
-## 🗺️ Roadmap
-
-- [ ] Vector embeddings for semantic search
-- [ ] AI-powered candidate ranking and scoring
-- [ ] Automated resume summarization
-- [ ] WhatsApp integration for candidate communication
-- [ ] Advanced filtering and search UI
-- [ ] Batch processing with Celery workers
+| `GEMINI_API_KEY` | Google Gemini API key | - |
+| `JWT_SECRET_KEY` | JWT signing secret | - |
+| `LLM_CONCURRENCY_LIMIT` | Max parallel LLM calls | `5` |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | Rate limit per user | `60` |
 
 ---
 

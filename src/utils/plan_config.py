@@ -1,0 +1,73 @@
+PLANS = {
+    "free": {
+        "active_jobs": 1,
+        "cv_per_job": 25,
+        "storage_cap_cvs": 100,
+        "monthly_screenings": 25,
+        "force_smart_screen": True,
+        "smart_screen_ratio": {"fixed": 0.20},   # Fixed 20% top-tier
+        "vector_search": True,
+        "cross_project_search": False,
+        "export": True,
+        "custom_weights": False,
+        "priority_queue": False,
+        "can_delete": True,
+    },
+    "starter": {
+        "active_jobs": 2,
+        "cv_per_job": 100,
+        "storage_cap_cvs": 500,
+        "monthly_screenings": 75,
+        "force_smart_screen": False,
+        "smart_screen_ratio": {"min": 0.10, "max": 0.40},
+        "vector_search": True,
+        "cross_project_search": False,
+        "export": True,
+        "custom_weights": True,
+        "priority_queue": False,
+        "can_delete": True,
+    },
+    "pro": {
+        "active_jobs": 3,
+        "cv_per_job": 300,
+        "storage_cap_cvs": 1500,
+        "monthly_screenings": 200,
+        "force_smart_screen": False,
+        "smart_screen_ratio": {"min": 0.10, "max": 0.40},  # Dynamic 10-40%
+        "vector_search": True,
+        "cross_project_search": False,
+        "export": True,
+        "custom_weights": True,
+        "priority_queue": True,
+        "can_delete": True,
+    },
+    "agency": {
+        "active_jobs": 6,
+        "cv_per_job": 1000,
+        "storage_cap_cvs": 6000,
+        "monthly_screenings": 2000,
+        "force_smart_screen": False,
+        "smart_screen_ratio": {"min": 0.10, "max": 0.40},  # Dynamic 10-40%
+        "vector_search": True,
+        "cross_project_search": True,
+        "export": True,
+        "custom_weights": True,
+        "priority_queue": True,
+        "can_delete": True,
+    },
+    "payg": {
+        "active_jobs": 3,
+        "cv_per_job": 300,
+        "storage_cap_cvs": 1500,
+        "monthly_screenings": 0, # They pay per screening, so this should not enforce a flat limit, assuming logic is checking available credits
+        "force_smart_screen": False,
+        "smart_screen_ratio": {"min": 0.10, "max": 0.40},
+        "vector_search": True,
+        "cross_project_search": False,
+        "export": True,
+        "custom_weights": True,
+        "priority_queue": True,
+        "can_delete": True,
+    }
+}
+
