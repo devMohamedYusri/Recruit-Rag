@@ -5,6 +5,7 @@ from bson import ObjectId
 
 
 class ResumeModel(BaseDataModel):
+    """Model for managing indexed resumes in MongoDB."""
     collection_setting_key: str = "RESUMES_COLLECTION"
 
     def __init__(self, db_client: object):
@@ -12,11 +13,13 @@ class ResumeModel(BaseDataModel):
 
     @classmethod
     async def create_instance(cls, db_client: object):
+        """Creates an instance and initializes the collection indexes."""
         instance = cls(db_client=db_client)
         await instance.init_collection()
         return instance
 
     async def init_collection(self):
+        """Initializes MongoDB indexes for the resumes collection."""
         indexes = Resume.get_indexes()
         models = [
             IndexModel(
@@ -28,46 +31,81 @@ class ResumeModel(BaseDataModel):
         if models:
             await self.collection.create_indexes(models)
 
+
     async def create_resume(self, resume_data: Resume):
-        data = resume_data.model_dump(by_alias=True, exclude_none=True)
+        data = resume_data.model_dump(by_alias=True)
+        # Drop None _id to let MongoDB auto-generate it if not present
+        if data.get("_id") is None:
+            del data["_id"]
+            
         result = await self.collection.insert_one(data)
         data["_id"] = result.inserted_id
         return Resume(**data)
 
-    async def get_resume_by_id(self, resume_id: str):
+    async def create_resumes_bulk(self, resumes: list[Resume]) -> list[Resume]:
+        if not resumes:
+            return []
+        
+        docs = []
+        for r in resumes:
+            d = r.model_dump(by_alias=True)
+            if d.get("_id") is None:
+                del d["_id"]
+            docs.append(d)
+            
+        result = await self.collection.insert_many(docs)
+        for i, inserted_id in enumerate(result.inserted_ids):
+            resumes[i].id = inserted_id
+        return resumes
+
+    async def get_resume_by_id(self, resume_id: str, user_id: object):
         record = await self.collection.find_one({
-            "_id": ObjectId(resume_id) if ObjectId.is_valid(resume_id) else resume_id
+            "_id": ObjectId(resume_id) if ObjectId.is_valid(resume_id) else resume_id,
+            "user_id": user_id
         })
         if record:
             return Resume(**record)
         return None
 
-    async def get_resumes_by_project_id(self, project_id: str):
-        records = await self.collection.find({
-            "project_id": project_id
-        }).to_list(length=None)
-        return [Resume(**record) for record in records]
-
-    async def get_resumes_by_file_ids(self, project_id: str, file_ids: list[str]):
+    async def get_resumes_by_project_id(self, project_id: str, user_id: object):
         records = await self.collection.find({
             "project_id": project_id,
-            "file_id": {"$in": file_ids}
-        }).to_list(length=None)
+            "user_id": user_id
+        }).to_list(length=1000)
         return [Resume(**record) for record in records]
 
-    async def delete_resumes_by_project_id(self, project_id: str):
+    async def get_resume_by_hash(self, project_id: str, user_id: object, resume_hash: str):
+        record = await self.collection.find_one({
+            "project_id": project_id,
+            "user_id": user_id,
+            "resume_hash": resume_hash
+        })
+        if record:
+            return Resume(**record)
+        return None
+
+    async def get_resumes_by_file_ids(self, project_id: str, user_id: object, file_ids: list[str]):
+        records = await self.collection.find({
+            "project_id": project_id,
+            "user_id": user_id,
+            "file_id": {"$in": file_ids}
+        }).to_list(length=1000)
+        return [Resume(**record) for record in records]
+
+    async def delete_resumes_by_project_id(self, project_id: str, user_id: object):
         result = await self.collection.delete_many({
-            "project_id": project_id
+            "project_id": project_id,
+            "user_id": user_id
         })
         return result.deleted_count
 
-    async def get_resumes_by_ids(self, resume_ids: list[str]):
+    async def get_resumes_by_ids(self, resume_ids: list[str], user_id: object):
         object_ids = [
             ObjectId(rid) if ObjectId.is_valid(rid) else rid
             for rid in resume_ids
         ]
         records = await self.collection.find({
-            "_id": {"$in": object_ids}
-        }).to_list(length=None)
+            "_id": {"$in": object_ids},
+            "user_id": user_id
+        }).to_list(length=1000)
         return [Resume(**record) for record in records]
-

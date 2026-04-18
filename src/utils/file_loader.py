@@ -4,20 +4,71 @@ from langchain_community.document_loaders import UnstructuredWordDocumentLoader,
 from utils.constants import SECTION_KEYWORDS
 
 def load_document(file_path: str, file_extension: str) -> str:
-    """Load text content from a file based on its extension."""
-    if file_extension in ["pdf", "epub", "mobi"]:
-        loader = PyMuPDF4LLMLoader(file_path)
-    elif file_extension == "txt":
-        loader = TextLoader(file_path, encoding="utf-8")
-    elif file_extension in ["docx"]:
-        loader = UnstructuredWordDocumentLoader(file_path, mode="single")
-    else:
-        raise ValueError(f"Unsupported file extension: {file_extension}")
+    """Load text content from a file with a fast-pass/slow-fallback strategy."""
+    import gc
+    import fitz
+    from utils.constants import SECTION_KEYWORDS
+    
+    try:
+        if file_extension in ["pdf", "epub", "mobi"]:
+            # --- PASS 1: Fast Direct Extraction ---
+            try:
+                doc = fitz.open(file_path)
+                fast_text = ""
+                for page in doc:
+                    fast_text += page.get_text()
+                doc.close()
+                
+                # Validate Fast Pass: Check for keywords and length
+                content_lower = fast_text.lower()
+                matched = sum(1 for kw in SECTION_KEYWORDS if kw in content_lower)
+                
+                # If we have basic resume indicators, trust the fast pass
+                if matched >= 3 and len(fast_text.strip()) > 300:
+                    return fast_text
+            except Exception:
+                pass # Fallback to Pass 2
 
-    docs = loader.load()
-    if not docs:
+            # --- PASS 2: AI Layout Extraction (PyMuPDF4LLM) ---
+            loader = PyMuPDF4LLMLoader(file_path)
+            docs = loader.load()
+            if not docs:
+                return ""
+            return "\n\n".join(doc.page_content for doc in docs)
+
+        elif file_extension == "txt":
+            loader = TextLoader(file_path, encoding="utf-8")
+            docs = loader.load()
+            return "\n\n".join(doc.page_content for doc in docs)
+        elif file_extension in ["docx"]:
+            loader = UnstructuredWordDocumentLoader(file_path, mode="single")
+            docs = loader.load()
+            return "\n\n".join(doc.page_content for doc in docs)
+        else:
+            raise ValueError(f"Unsupported file extension: {file_extension}")
+
+    finally:
+        gc.collect()
+
+def load_document_standard(file_path: str, file_extension: str) -> str:
+    """Standard (last resort) local extraction using bare libraries."""
+    import gc
+    try:
+        if file_extension in ["pdf"]:
+            import fitz
+            doc = fitz.open(file_path)
+            text = ""
+            for page in doc:
+                text += page.get_text()
+            doc.close()
+            return text
+        elif file_extension in ["docx"]:
+            import docx
+            doc = docx.Document(file_path)
+            return "\n".join([p.text for p in doc.paragraphs])
         return ""
-    return "\n\n".join(doc.page_content for doc in docs)
+    finally:
+        gc.collect()
 
 def validate_extraction(content: str) -> bool:
     """Validate if the extracted content looks like a resume."""

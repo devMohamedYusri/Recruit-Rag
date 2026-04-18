@@ -5,6 +5,7 @@ from pymongo import IndexModel, InsertOne
 
 
 class ChunkModel(BaseDataModel):
+    """Model for managing text chunks for RAG in MongoDB."""
     collection_setting_key: str = "CHUNKS_COLLECTION"
 
     def __init__(self, db_client: object):
@@ -12,12 +13,13 @@ class ChunkModel(BaseDataModel):
 
     @classmethod
     async def create_instance(cls, db_client: object):
+        """Creates an instance and initializes the collection indexes."""
         instance = cls(db_client=db_client)
         await instance.init_collection()
         return instance
 
-
     async def init_collection(self):
+        """Initializes MongoDB indexes for the chunks collection."""
         indexes = Chunk.get_indexes()
         models = [
             IndexModel(
@@ -29,6 +31,7 @@ class ChunkModel(BaseDataModel):
 
         if models:
             await self.collection.create_indexes(models)
+
 
     async def create_chunk(self, chunk_data: Chunk):
         data = chunk_data.model_dump(by_alias=True, exclude_none=True)
@@ -53,10 +56,11 @@ class ChunkModel(BaseDataModel):
             operations = [InsertOne(data) for data in data_batch]
             await self.collection.bulk_write(operations)
         return len(chunks)
-    async def delete_chunks_by_project_id(self, project_id: str):
-        result = await self.collection.delete_many({
-            "project_id": project_id
-        })
+    async def delete_chunks_by_project_id(self, project_id: str, user_id: object = None):
+        query = {"project_id": project_id}
+        if user_id:
+            query["user_id"] = user_id
+        result = await self.collection.delete_many(query)
         return result.deleted_count
 
     async def get_chunks_by_project_id(self, project_id: str, page: int = 1, limit: int = 40):

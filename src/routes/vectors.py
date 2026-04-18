@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status, Request, HTTPException
 from fastapi.responses import JSONResponse
-from controllers import VectorController
+from controllers import VectorController, PlanGuardService
 from models import ProjectModel
 from .schema import SearchVectorsRequest
 import logging
@@ -17,6 +17,8 @@ async def info_vectors(
     request: Request,
     project_id: str,
 ):
+    user_id = str(request.state.user["sub"])
+    db = request.app.state.db_client
     try:
         vector_db = request.app.state.vector_db
         embedding_client = request.app.state.embedding_client
@@ -26,10 +28,10 @@ async def info_vectors(
             embedding_model=embedding_client,
         )
 
-        project_model = await ProjectModel.create_instance(
-            db_client=request.app.state.db_client
-        )
-        project = await project_model.get_project_or_create_one(project_id=project_id)
+        project_model = request.app.state.project_model
+        project = await project_model.get_project_by_id(project_id=project_id, user_id=user_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
 
         collection_info = await vector_controller.vector_info(
             project_id=project.project_id,
@@ -39,6 +41,8 @@ async def info_vectors(
             status_code=status.HTTP_200_OK,
             content={"collection_info": collection_info},
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting info for project {project_id}: {e}")
         raise HTTPException(
@@ -52,6 +56,8 @@ async def search_vectors(
     project_id: str,
     search_request: SearchVectorsRequest,
 ):
+    user_id = str(request.state.user["sub"])
+    db = request.app.state.db_client
     try:
         vector_db = request.app.state.vector_db
         embedding_client = request.app.state.embedding_client
@@ -61,10 +67,10 @@ async def search_vectors(
             embedding_model=embedding_client,
         )
 
-        project_model = await ProjectModel.create_instance(
-            db_client=request.app.state.db_client
-        )
-        project = await project_model.get_project_or_create_one(project_id=project_id)
+        project_model = request.app.state.project_model
+        project = await project_model.get_project_by_id(project_id=project_id, user_id=user_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
 
         results = await vector_controller.search_vectors(
             project=project,
@@ -81,6 +87,8 @@ async def search_vectors(
                 ],
             },
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error searching vectors for project {project_id}: {e}")
         raise HTTPException(
@@ -93,10 +101,19 @@ async def search_vectors_body(
     request: Request,
     search_request: SearchVectorsRequest,
 ):
+    # This might eventually support cross-project search (if plan allowed)
     project_id = search_request.project_id
     if not project_id:
+        user_id = str(request.state.user["sub"])
+        db = request.app.state.db_client
+        # Plan guard: Check cross-project search
+        plan_guard = PlanGuardService(db)
+        await plan_guard.check_feature_allowed(user_id, "cross_project_search")
+        
+        # Implementation for cross-project search would go here
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="project_id is required in the request body"
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Cross-project search is not yet implemented"
         )
+        
     return await search_vectors(request, project_id, search_request)

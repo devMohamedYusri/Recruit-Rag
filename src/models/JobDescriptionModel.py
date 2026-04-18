@@ -1,7 +1,7 @@
 from .BaseDataModel import BaseDataModel
 from .DB_schemas.job_description import JobDescription
 from pymongo import IndexModel
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class JobDescriptionModel(BaseDataModel):
@@ -28,29 +28,39 @@ class JobDescriptionModel(BaseDataModel):
         if models:
             await self.collection.create_indexes(models)
 
-    async def create_or_update_job_description(self, jd_data: JobDescription):
+    async def create_or_update_job_description(self, jd_data: JobDescription, user_id: object):
         data = jd_data.model_dump(by_alias=True, exclude_none=True)
-        data["updated_at"] = datetime.now().isoformat()
+        data["updated_at"] = datetime.now(timezone.utc)
+        data["user_id"] = user_id
 
-        existing = await self.collection.find_one({"project_id": jd_data.project_id})
+        existing = await self.collection.find_one({
+            "project_id": jd_data.project_id,
+            "user_id": user_id
+        })
         if existing:
             await self.collection.update_one(
-                {"project_id": jd_data.project_id},
+                {"project_id": jd_data.project_id, "user_id": user_id},
                 {"$set": data}
             )
-            updated = await self.collection.find_one({"project_id": jd_data.project_id})
+            updated = await self.collection.find_one({"project_id": jd_data.project_id, "user_id": user_id})
             return JobDescription(**updated)
         else:
             result = await self.collection.insert_one(data)
             data["_id"] = result.inserted_id
             return JobDescription(**data)
 
-    async def get_by_project_id(self, project_id: str):
-        record = await self.collection.find_one({"project_id": project_id})
+    async def get_by_project_id(self, project_id: str, user_id: object):
+        record = await self.collection.find_one({
+            "project_id": project_id,
+            "user_id": user_id
+        })
         if record:
             return JobDescription(**record)
         return None
 
-    async def delete_by_project_id(self, project_id: str):
-        result = await self.collection.delete_many({"project_id": project_id})
+    async def delete_by_project_id(self, project_id: str, user_id: object):
+        result = await self.collection.delete_many({
+            "project_id": project_id,
+            "user_id": user_id
+        })
         return result.deleted_count

@@ -4,12 +4,14 @@ import aiofiles
 import zipfile
 import io
 import logging
-from models import AssetModel, ProjectModel
+import asyncio
+from models import AssetModel
 from models.DB_schemas.asset import Asset
 from .BaseController import BaseController
 from fastapi import UploadFile, HTTPException, status
 from .ProjectController import ProjectController
 from utils.constants import ALLOWED_EXTENSIONS, ZIP_CONTENT_TYPES
+import aioboto3
 
 project_controller = ProjectController()
 logger = logging.getLogger(__name__)
@@ -27,13 +29,10 @@ class DataController(BaseController):
 
     # ── Upload Pipeline ──────────────────────────────────────────────────
 
-    async def handle_upload(self, project_id: str, files: list[UploadFile], db_client):
-        max_files = self.app_settings.UPLOAD_MAX_FILES
+    async def handle_upload(self, project_id: str, files: list[UploadFile], asset_model, user_id: object, max_files: int = None):
+        if max_files is None:
+            max_files = self.app_settings.UPLOAD_MAX_FILES
         max_total_bytes = self.app_settings.UPLOAD_MAX_TOTAL_SIZE_MB * 1024 * 1024
-
-        project_model = await ProjectModel.create_instance(db_client)
-        asset_model = await AssetModel.create_instance(db_client)
-        await project_model.get_project_or_create_one(project_id)
 
         # 1. Validate input count
         if len(files) > max_files:
@@ -61,7 +60,7 @@ class DataController(BaseController):
             )
 
         # 5. Save files & create assets
-        return await self._save_files(final_file_list, project_id, asset_model)
+        return await self._save_files(final_file_list, project_id, asset_model, user_id)
 
     # ── Private Helpers ──────────────────────────────────────────────────
 
@@ -142,54 +141,122 @@ class DataController(BaseController):
             or filename.startswith(".")
         )
 
-    async def _save_files(self, file_list: list[dict], project_id: str, asset_model) -> list[Asset]:
-        """Save files to disk and create asset records in the database."""
+    @property
+    def _s3_sem(self):
+        if getattr(self, "__s3_sem", None) is None:
+            import asyncio
+            self.__s3_sem = asyncio.Semaphore(50)
+        return self.__s3_sem
+
+    @property
+    def _db_sem(self):
+        if getattr(self, "__db_sem", None) is None:
+            import asyncio
+            self.__db_sem = asyncio.Semaphore(10)
+        return self.__db_sem
+
+    async def _save_files(self, file_list: list[dict], project_id: str, asset_model, user_id: object) -> list[Asset]:
+        """Save files to disk or S3/R2 and create asset records in parallel."""
         uploaded_assets = []
+        is_cloud = bool(self.app_settings.S3_ENDPOINT_URL and self.app_settings.S3_BUCKET_NAME)
 
-        for file_data in file_list:
+        async def upload_one(file_data, s3_client=None):
             file_path, file_name = self.generate_unique_file_name(file_data["filename"], project_id)
+            final_url = ""
 
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            # Phase 1: Network I/O (S3 or Disk) with high parallelism
+            if is_cloud and s3_client:
+                s3_key = f"projects/{project_id}/{file_name}"
+                await s3_client.put_object(
+                    Bucket=self.app_settings.S3_BUCKET_NAME,
+                    Key=s3_key,
+                    Body=file_data["content"],
+                    ContentType="application/octet-stream"
+                )
+                final_url = f"s3://{self.app_settings.S3_BUCKET_NAME}/{s3_key}"
+            else:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                async with aiofiles.open(file_path, 'wb') as out_file:
+                    await out_file.write(file_data["content"])
+                final_url = file_path
 
-            async with aiofiles.open(file_path, 'wb') as out_file:
-                await out_file.write(file_data["content"])
-
+            # Phase 2: Database Insert with throttled parallelism
             asset_obj = Asset(
                 project_id=project_id,
+                user_id=user_id,
                 name=file_name,
                 type="application/octet-stream",
                 size_in_bytes=file_data["size"],
-                url=file_path
+                url=final_url
             )
 
-            await asset_model.create_asset(asset_obj)
-            uploaded_assets.append(asset_obj)
+            async with self._db_sem:
+                await asset_model.create_asset(asset_obj)
+                
+            return asset_obj
 
-        return uploaded_assets
+        if is_cloud:
+            async with self._s3_sem:
+                session = aioboto3.Session()
+                async with session.client(
+                    's3',
+                    endpoint_url=self.app_settings.S3_ENDPOINT_URL,
+                    aws_access_key_id=self.app_settings.S3_ACCESS_KEY_ID,
+                    aws_secret_access_key=self.app_settings.S3_SECRET_ACCESS_KEY
+                ) as s3_client:
+                    # Launch all uploads concurrently
+                    tasks = [upload_one(f, s3_client) for f in file_list]
+                    uploaded_assets = await asyncio.gather(*tasks)
+        else:
+            async with self._s3_sem:
+                # Parallel local disk writes
+                tasks = [upload_one(f) for f in file_list]
+                uploaded_assets = await asyncio.gather(*tasks)
+
+        return list(uploaded_assets)
 
     def generate_unique_file_name(self, original_file_name: str, project_id: str) -> tuple[str, str]:
         extension = original_file_name.rsplit(".", 1)[-1]
         unique_id = str(uuid.uuid4())
+        # We might want to include user_id in path for better isolation on disk too
         new_file_name = f"{project_id}_{unique_id}.{extension}"
         project_path = project_controller.get_project_asset_path(project_id)
         file_path = os.path.join(project_path, new_file_name)
         return file_path, new_file_name
 
-    async def delete_asset(self, asset_id: str, asset_model):
-        """Delete an asset from disk and database."""
-        asset = await asset_model.get_asset_by_id(asset_id)
+    async def delete_asset(self, asset_id: str, asset_model, user_id: object):
+        """Delete an asset from disk/S3 and database."""
+        asset = await asset_model.get_asset_by_id(asset_id, user_id)
         if not asset:
-            return False, f"Asset '{asset_id}' not found"
+            return False, f"Asset '{asset_id}' not found or access denied"
 
-        # 1. Delete from disk
-        if asset.url and os.path.exists(asset.url):
-            try:
-                os.remove(asset.url)
-            except Exception as e:
-                logger.warning(f"Failed to delete file from disk: {e}")
+        # 1. Delete from storage (S3 or local disk)
+        if asset.url:
+            if asset.url.startswith("s3://"):
+                try:
+                    # s3://bucket-name/projects/proj-id/file.pdf -> key is projects/proj-id/file.pdf
+                    bucket = self.app_settings.S3_BUCKET_NAME
+                    s3_prefix = f"s3://{bucket}/"
+                    if asset.url.startswith(s3_prefix):
+                        s3_key = asset.url[len(s3_prefix):]
+                        session = aioboto3.Session()
+                        async with session.client(
+                            's3',
+                            endpoint_url=self.app_settings.S3_ENDPOINT_URL,
+                            aws_access_key_id=self.app_settings.S3_ACCESS_KEY_ID,
+                            aws_secret_access_key=self.app_settings.S3_SECRET_ACCESS_KEY
+                        ) as s3_client:
+                            await s3_client.delete_object(Bucket=bucket, Key=s3_key)
+                except Exception as e:
+                    logger.warning(f"Failed to delete file from S3: {e}")
+            elif os.path.exists(asset.url):
+                try:
+                    os.remove(asset.url)
+                except Exception as e:
+                    logger.warning(f"Failed to delete file from disk: {e}")
 
         # 2. Delete from DB
-        success = await asset_model.delete_asset_by_id(asset_id)
+        success = await asset_model.delete_asset_by_id(asset_id, user_id)
         if success:
             return True, f"Asset '{asset_id}' deleted successfully"
         return False, "Failed to delete asset from database"

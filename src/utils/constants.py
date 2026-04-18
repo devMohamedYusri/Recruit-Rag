@@ -21,7 +21,7 @@ ERROR_RESULT_TEMPLATE = {
 LIGHT_RESULT_TEMPLATE = {
     "fit_score": 0,
     "fit_label": "Light Match",
-    "executive_summary": "Candidate processed via Light Screen (Standard Tier).",
+    "executive_summary": "Candidate processed via light processing",
     "key_match_analysis": {
         "strengths": [],
         "missing_critical_skills": [],
@@ -87,3 +87,9 @@ BATCH_STRUCTURING_GENERATION_CONFIG = {
 JSON_GENERATION_CONFIG = {
     "response_mime_type": "application/json"
 }
+
+# Hard Determinism Version Control
+EMBEDDING_VERSION = "v1"
+SCORING_VERSION = "v1"
+LLM_PROMPT_VERSION = "v1"
+FEATURE_VERSION = "v1"

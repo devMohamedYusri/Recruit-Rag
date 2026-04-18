@@ -9,6 +9,7 @@ import numpy as np
 import json
 import pathlib
 import asyncio
+from langsmith import traceable
 
 
 class GeminiProvider(LLMInterface):
@@ -29,9 +30,9 @@ class GeminiProvider(LLMInterface):
         self.client = genai.Client(api_key=self.api_key)
 
         self.default_config = {
-            "max_output_tokens": 2048,
-            "temperature": 0.1,
-            "top_p": 0.9
+            "max_output_tokens": 4096,
+            "temperature": 0,
+            "top_p": 0
         }
         self.logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class GeminiProvider(LLMInterface):
             "total_tokens": response.usage_metadata.total_token_count
         }
 
+    @traceable(name="gemini_generate", run_type="llm")
     async def generate(self, prompt: str, config: Optional[Dict[str, Any]] = None) -> LLMResponse:
         if not self.client:
             raise RuntimeError("genai client was not set")
@@ -80,31 +82,37 @@ class GeminiProvider(LLMInterface):
             self.logger.error(f"Gemini generation error: {e}")
             raise RuntimeError(f"Failed to generate content: {str(e)}")
 
-    async def embed_documents(self, texts):
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not self.client:
             raise RuntimeError("genai client was not set")
         if not self.embedding_model_id:
             raise RuntimeError("embedding model was not set")
+        
+        # Gemini limit is 100 items per batch
+        BATCH_SIZE = 100
+        all_embeddings = []
+
         try:
-            response = await self.client.aio.models.embed_content(
-                model=self.embedding_model_id,
-                contents=texts,
-                config=types.EmbedContentConfig(
-                    task_type="RETRIEVAL_DOCUMENT",
-                    title="Resume Snippet",
-                    output_dimensionality=self.embedding_dimension
+            for i in range(0, len(texts), BATCH_SIZE):
+                batch = texts[i : i + BATCH_SIZE]
+                response = await self.client.aio.models.embed_content(
+                    model=self.embedding_model_id,
+                    contents=batch,
+                    config=types.EmbedContentConfig(
+                        task_type="RETRIEVAL_DOCUMENT",
+                        title="Resume Snippet",
+                        output_dimensionality=self.embedding_dimension
+                    )
                 )
-            )
 
-            embeddings = []
-            for emb in response.embeddings:
-                v = np.array(emb.values)
-                norm = np.linalg.norm(v)
-                if norm > 0:
-                    v = v / norm
-                embeddings.append(v.tolist())
+                for emb in response.embeddings:
+                    v = np.array(emb.values)
+                    norm = np.linalg.norm(v)
+                    if norm > 0:
+                        v = v / norm
+                    all_embeddings.append(v.tolist())
 
-            return embeddings
+            return all_embeddings
         except Exception as e:
             self.logger.error(f"Embedding doc error: {e}")
             raise RuntimeError(f"Failed to embed documents: {str(e)}")
@@ -155,18 +163,36 @@ class GeminiProvider(LLMInterface):
             self.logger.error(f"File upload error: {e}")
             raise RuntimeError(f"Failed to upload file: {str(e)}")
 
-    async def extract_structured_resume(self, file_ref) -> LLMResponse:
+    @traceable(name="gemini_extract_structured_resume", run_type="llm")
+    async def extract_structured_resume(self, file_ref, prompt: str = None) -> LLMResponse:
         """Fallback: extract and structure a resume directly from an uploaded file."""
+        from utils.prompts import RESUME_STRUCTURE_PROMPT
+        from models.DB_schemas.screening import ExtractedResume
+
+        final_prompt = prompt or RESUME_STRUCTURE_PROMPT
+        schema = ExtractedResume.model_json_schema()
+        schema_str = json.dumps(schema, indent=2)
+
         try:
-            prompt = RESUME_STRUCTURE_PROMPT + "\n\nExtract the resume from the uploaded document."
+            full_prompt = (
+                f"{final_prompt}\n\n"
+                f"You MUST return a JSON object that strictly adheres to the following JSON schema:\n{schema_str}\n\n"
+                "Extract the resume from the uploaded document."
+            )
 
             response = await self.client.aio.models.generate_content(
                 model=self.model_id,
-                contents=[file_ref, prompt],
+                contents=[file_ref, full_prompt],
                 config=types.GenerateContentConfig(**EXTRACTION_GENERATION_CONFIG)
             )
 
-            result = json.loads(response.text)
+            content_text = response.text
+            if "```json" in content_text:
+                content_text = content_text.split("```json")[-1].split("```")[0].strip()
+            elif "```" in content_text:
+                 content_text = content_text.split("```")[-1].split("```")[0].strip()
+
+            result = json.loads(content_text, strict=False)
             if isinstance(result, list):
                 result = result[0]
 
@@ -176,30 +202,56 @@ class GeminiProvider(LLMInterface):
             self.logger.error(f"Fallback extraction error: {e}")
             raise RuntimeError(f"Failed to extract resume via Gemini: {str(e)}")
 
-    async def structure_resume_batch(self, markdown_texts: list[str]) -> LLMResponse:
+    @traceable(name="gemini_structure_resume_batch", run_type="llm")
+    async def structure_resume_batch(self, markdown_texts: list[str], prompt: str = None) -> LLMResponse:
         """Structure 2-3 locally-parsed markdown CVs into parsed_data JSON."""
+        from utils.prompts import RESUME_STRUCTURE_PROMPT
+        from models.DB_schemas.screening import ExtractedResume
+
+        final_prompt_base = prompt or RESUME_STRUCTURE_PROMPT
+
         try:
             labeled_resumes = [
                 f"=== RESUME {i+1} ===\n{text}\n=== END RESUME {i+1} ==="
                 for i, text in enumerate(markdown_texts)
             ]
             combined = "\n\n".join(labeled_resumes)
-            prompt = (
-                RESUME_STRUCTURE_PROMPT
-                + f"\n\nThere are {len(markdown_texts)} resumes below. "
-                + f"Return a JSON array with {len(markdown_texts)} objects, one per resume, in the same order.\n\n"
-                + combined
+            
+            schema = ExtractedResume.model_json_schema()
+            schema_str = json.dumps(schema, indent=2)
+
+            prompt_text = (
+                f"{final_prompt_base}\n\n"
+                f"There are {len(markdown_texts)} resumes below. "
+                "Return a JSON object with a key 'resumes' containing an array of objects that strictly follow this JSON schema:\n"
+                f"{schema_str}\n\n"
+                f"{combined}"
             )
 
             response = await self.client.aio.models.generate_content(
                 model=self.model_id,
-                contents=prompt,
+                contents=prompt_text,
                 config=types.GenerateContentConfig(**BATCH_STRUCTURING_GENERATION_CONFIG)
             )
 
-            result = json.loads(response.text)
+            content_text = response.text
+            if "```json" in content_text:
+                content_text = content_text.split("```json")[-1].split("```")[0].strip()
+            elif "```" in content_text:
+                 content_text = content_text.split("```")[-1].split("```")[0].strip()
+
+            data = json.loads(content_text, strict=False)
+            result = data.get("resumes", data) if isinstance(data, dict) else data
+
             if not isinstance(result, list):
-                result = [result]
+                if isinstance(data, dict):
+                     for v in data.values():
+                         if isinstance(v, list):
+                             result = v
+                             break
+            
+            if not isinstance(result, list):
+                 result = [result]
 
             if len(result) != len(markdown_texts):
                 self.logger.warning(

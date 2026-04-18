@@ -4,10 +4,10 @@ from .types import PyObjectId
 
 class Chunk(BaseModel):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
-    content:str=Field(...,min_length=1)
+    content: str = Field(..., min_length=1)
     metadata: dict
-    chunk_order:int =Field(...,gt=0)
-    project_id: str=Field(...,min_length=1)
+    chunk_order: int = Field(..., gt=0)
+    project_id: str = Field(..., min_length=1)
     def __str__(self):
         return f"Chunk(id={self.id}, project_id={self.project_id}, content={self.content}, metadata={self.metadata}, chunk_order={self.chunk_order})"
     

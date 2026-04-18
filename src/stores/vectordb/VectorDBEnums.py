@@ -29,8 +29,9 @@ class VectorDBConfig(BaseModel):
         embedding_dim:   Dimensionality of the embedding vectors.
         distance:        Distance metric for similarity search.
     """
-    path: str
-    api_key: Optional[str] = None
+    path: str | None = None
+    url: str | None = None
+    api_key: str | None = None
     vector_db_type: str
     collection_name: str
     embedding_dim: int
